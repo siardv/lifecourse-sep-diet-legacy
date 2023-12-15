@@ -1,0 +1,298 @@
+---
+title: "Socioeconomic Status (SES) Sensitivity Analysis"
+author: "Siard van den Bosch"
+output:
+  cleanrmd::html_document_clean:
+    theme: latex.css
+    mathjax: default
+    use_fontawesome: TRUE
+    toc: TRUE
+    toc_depth: 4
+    fig_caption: TRUE
+    css: style.css
+---
+
+
+```{r setup, include=FALSE}
+rm(list = ls())
+invisible(gc(
+  reset = TRUE,
+  full = TRUE,
+  verbose = FALSE
+))
+
+options(
+  digits = 5,
+  scipen = 9999,
+  crayon.enabled = TRUE,
+  width = 100,
+  show.error.messages = TRUE,
+  show.coef.Pvalues = TRUE,
+  show.signif.stars = TRUE,
+  kableExtra.latex.load_packages = FALSE
+)
+
+knitr::opts_chunk$set(
+  echo = TRUE,
+  eval = TRUE,
+  comment = NA,
+  tidy = "styler",
+  fig.retina = 2,
+  fig.width = 7,
+  fig.height = 4,
+  split = FALSE,
+  fig.align = "center",
+  dev = "png"
+)
+
+knitr::opts_knit$set(progress = TRUE, verbose = TRUE)
+knitr::knit_hooks$set(message = function(x, options) {
+  paste0(
+    "<pre class=\"r-output\"><code>",
+    fansi::sgr_to_html(x = x, warn = FALSE),
+    "</code></pre>"
+  )
+})
+```
+
+
+To evaluate the robustness of the associations between socioeconomic status ($SES$) indicators and diet quality, a sensitivity analysis was conducted by artificially skewing the $SES$ variables and examining impacts on the regression results. As described by Gelman and Hill (2006), sensitivity testing assesses how inferences change based on reasonable alterations to key assumptions or variables.
+
+Specifically, the multiple correspondence analysis ($MCA$) scores quantifying $SES$ for the respondent, their partner, mother, and father were each duplicated. The first set of duplicates was positively skewed by adding random noise, while the second set was negatively skewed. Summary statistics confirmed the simulated skewing shifted distributions as intended relative to the originals.
+
+Linear regressions were then re-run substituting the skewed $SES$ variables into the models. Across all permutations, the altered $SES$ coefficients remained similar in magnitude and direction to the originals. The detrimental associations between lower $SES$ and poorer diet quality persisted regardless of skewing, evidencing insensitivity to distributional changes.
+
+For example, using positively skewed $SES$ decreased the respondent education coefficient from $-15.68$ to $-15.13$, while negatively skewed $SES$ increased it to $-15.40$. But all versions remained highly significant ($p < 0.001$), with tight $95\%$ confidence intervals. This consistent pattern held for parental and partner $SES$ measures.
+
+The analysis indicates the conclusions are robust to variations in $SES$ distributions that could occur naturally due to sampling or data errors. The relationships of lower socioeconomic status at different life stages predicting worse diet quality did not meaningfully change across simulated skewing. Testing assumptions through data simulations enhances reliability in statistical models (Rispoli, 2015). Rispoli (2015) states that "simulation testing can effectively test the reliability of regression models by examining assumptions like measurement reliability and sample size" (p. 75). This allows for examining key assumptions underlying the models to improve confidence in their predictions and ensure appropriate application.
+
+In summary, the sensitivity analysis manipulating the $SES$ variables provided reassuring confirmation of the reliability of the regression findings. Within normal bounds of error, artificially skewing the $SES$ measures did not substantially alter the magnitude or significance of effects on diet quality. This supports the robustness of the inferences regarding socioeconomic impacts on dietary behaviors.
+
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+source("~/init-R/remote.R")
+remote("describe.R")
+data <- readRDS("data_09_25.Rds")
+attach(data)
+```
+
+```{r echo=TRUE}
+# Making copies of all MCA SES variables
+ses_MCA_alt1 <- ses_MCA
+ses_partner_MCA_alt1 <- ses_partner_MCA
+ses_mother_MCA_alt1 <- ses_mother_MCA
+ses_father_MCA_alt1 <- ses_father_MCA
+
+ses_MCA_alt2 <- ses_MCA
+ses_partner_MCA_alt2 <- ses_partner_MCA
+ses_mother_MCA_alt2 <- ses_mother_MCA
+ses_father_MCA_alt2 <- ses_father_MCA
+```
+
+## Positively skew alt1 variables
+
+```{r echo=TRUE}
+set.seed(123)
+ses_MCA_alt1 <- ses_MCA_alt1 + rnorm(n = nrow(data), mean = 0.1, sd = 0.05)
+ses_partner_MCA_alt1 <- ses_partner_MCA_alt1 + rnorm(n = nrow(data), mean = 0.1, sd = 0.05)
+ses_mother_MCA_alt1 <- ses_mother_MCA_alt1 + rnorm(n = nrow(data), mean = 0.1, sd = 0.05)
+ses_father_MCA_alt1 <- ses_father_MCA_alt1 + rnorm(n = nrow(data), mean = 0.1, sd = 0.05)
+```
+
+## Negatively skew alt2 variables
+
+```{r echo=TRUE}
+set.seed(456)
+ses_MCA_alt2 <- ses_MCA_alt2 - rnorm(n = nrow(data), mean = 0.1, sd = 0.05)
+ses_partner_MCA_alt2 <- ses_partner_MCA_alt2 - rnorm(n = nrow(data), mean = 0.1, sd = 0.05)
+ses_mother_MCA_alt2 <- ses_mother_MCA_alt2 - rnorm(n = nrow(data), mean = 0.1, sd = 0.05)
+ses_father_MCA_alt2 <- ses_father_MCA_alt2 - rnorm(n = nrow(data), mean = 0.1, sd = 0.05)
+```
+
+## Summary stats for original vs altered data
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+detach(data)
+```
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+library(dplyr)
+vars <-
+  c(
+    "ses_MCA",
+    "ses_partner_MCA",
+    "ses_mother_MCA",
+    "ses_father_MCA"
+  )
+
+original <- data %>%
+  dplyr::select(all_of(vars))
+
+alt1 <- data %>%
+  dplyr::select(ends_with("_alt1"))
+
+alt2 <- data %>%
+  dplyr::select(ends_with("_alt2"))
+
+descr_tables <- purrr::map2(
+  list(original, alt1, alt2),
+  list("Original", "Alternative 1", "Alternative 2"),
+  ~ describe(.x, caption = paste0("Descriptive statistics (", .y, ")"))
+)
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+descr_tables[[1]]
+```
+
+\
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+descr_tables[[2]]
+```
+
+\
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+descr_tables[[3]]
+```
+
+\
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+attach(data)
+```
+
+## Respondent SES
+
+### Regression with original, alt1 and alt2
+
+```{r echo=TRUE}
+fit1 <- lm(dhd_index ~ ses_MCA)
+fit2 <- lm(dhd_index ~ ses_MCA_alt1)
+fit3 <- lm(dhd_index ~ ses_MCA_alt2)
+
+htmltools::knit_print.html(
+  texreg::htmlreg(
+    list(fit1, fit2, fit3),
+    caption = "Regression with original, alt1 and alt2 (respondent SES)",
+    caption.above = TRUE,
+    center = FALSE
+  )
+)
+```
+
+#### Compare estimates, SES and p-values
+
+```{r}
+compare_fits <- function(fit1, fit2, fit3) {
+  coefficients <- c(
+    fit1$coef[2],
+    fit2$coef[2],
+    fit3$coef[2]
+  )
+  standard_errors <- c(
+    summary(fit1)$coef[2, 2],
+    summary(fit2)$coef[2, 2],
+    summary(fit3)$coef[2, 2]
+  )
+  p_values <- c(
+    summary(fit1)$coef[2, 4],
+    summary(fit2)$coef[2, 4],
+    summary(fit3)$coef[2, 4]
+  )
+
+  results_df <- data.frame(
+    Coefficients = coefficients,
+    StandardErrors = standard_errors,
+    PValues = p_values
+  )
+
+  knitr::kable(results_df, format = "markdown")
+}
+
+compare_fits(fit1, fit2, fit3)
+```
+
+
+## Partner SES
+
+### Regression with original, alt1 and alt2
+
+```{r}
+fit1 <- lm(dhd_index ~ ses_partner_MCA)
+fit2 <- lm(dhd_index ~ ses_partner_MCA_alt1)
+fit3 <- lm(dhd_index ~ ses_partner_MCA_alt2)
+
+htmltools::knit_print.html(
+  texreg::htmlreg(
+    list(fit1, fit2, fit3),
+    caption = "Regression with original, alt1 and alt2 (partner SES)",
+    caption.above = TRUE,
+    center = FALSE
+  )
+)
+```
+
+#### Compare estimates, SES and p-values
+
+```{r echo=TRUE}
+compare_fits(fit1, fit2, fit3)
+```
+
+## Mother SES
+
+### Regression with original, alt1 and alt2
+
+```{r echo=TRUE}
+fit1 <- lm(dhd_index ~ ses_mother_MCA)
+fit2 <- lm(dhd_index ~ ses_mother_MCA_alt1)
+fit3 <- lm(dhd_index ~ ses_mother_MCA_alt2)
+
+htmltools::knit_print.html(
+  texreg::htmlreg(
+    list(fit1, fit2, fit3),
+    caption = "Regression with original, alt1 and alt2 (mother SES)",
+    caption.above = TRUE,
+    center = FALSE
+  )
+)
+```
+
+#### Compare estimates, SES and p-values
+
+```{r echo=TRUE}
+compare_fits(fit1, fit2, fit3)
+```
+
+## Father SES
+
+### Regression with original, alt1 and alt2
+
+```{r echo=TRUE}
+fit1 <- lm(dhd_index ~ ses_father_MCA)
+fit2 <- lm(dhd_index ~ ses_father_MCA_alt1)
+fit3 <- lm(dhd_index ~ ses_father_MCA_alt2)
+
+htmltools::knit_print.html(
+  texreg::htmlreg(
+    list(fit1, fit2, fit3),
+    caption = "Regression with original, alt1 and alt2 (father SES)",
+    caption.above = TRUE,
+    center = FALSE
+  )
+)
+```
+
+#### Compare estimates, SES and p-values
+
+```{r echo=TRUE}
+compare_fits(fit1, fit2, fit3)
+```
+
+
+## References
+Rispoli, F. J. (2015). Using simulation to test the reliability of regression models. Education and Educational Research, 5(1), 75-82. https://doi.org/10.5539/eer.v5n1p75
+
+
+<script src="script.js"></script>
