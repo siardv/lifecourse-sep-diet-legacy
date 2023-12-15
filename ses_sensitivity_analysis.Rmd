@@ -119,6 +119,88 @@ ses_mother_MCA_alt2 <- ses_mother_MCA_alt2 - rnorm(n = nrow(data), mean = 0.1, s
 ses_father_MCA_alt2 <- ses_father_MCA_alt2 - rnorm(n = nrow(data), mean = 0.1, sd = 0.05)
 ```
 
+
+```{r}
+data_long <- dplyr::select(
+  data,
+  # Respondent SES
+  ses_MCA,
+  ses_MCA_alt1,
+  ses_MCA_alt2,
+  # Partner SES
+  ses_partner_MCA,
+  ses_partner_MCA_alt1,
+  ses_partner_MCA_alt2,
+  # Father SES
+  ses_father_MCA,
+  ses_father_MCA_alt1,
+  ses_father_MCA_alt2,
+  # Mother SES
+  ses_mother_MCA,
+  ses_mother_MCA_alt1,
+  ses_mother_MCA_alt2 
+) %>%
+  tidyr::pivot_longer(
+    cols = everything(),
+    names_to = "variable",
+    values_to = "value"
+  )
+
+# Factorize variables by logical groups
+data_long <- data_long %>%
+  dplyr::mutate(variable = factor(
+    variable,
+    levels = c(
+      "ses_MCA",
+      "ses_MCA_alt1",
+      "ses_MCA_alt2",
+      "ses_partner_MCA",
+      "ses_partner_MCA_alt1",
+      "ses_partner_MCA_alt2",
+      "ses_mother_MCA",
+      "ses_mother_MCA_alt1",
+      "ses_mother_MCA_alt2",
+      "ses_father_MCA",
+      "ses_father_MCA_alt1",
+      "ses_father_MCA_alt2"
+    )
+  ))
+
+# Custom black and white theme
+bw_theme <- ggplot2::theme_minimal(base_size = 12) +
+  ggplot2::theme(
+    legend.position = "bottom",
+    legend.title = ggplot2::element_blank(),
+    axis.text.x = ggplot2::element_text(
+      angle = 45,
+      vjust = 1,
+      hjust = 1
+    ))
+
+# Create boxplot
+ggplot2::ggplot(
+  data_long, ggplot2::aes(x = variable, y = value)
+) +
+  ggplot2::geom_boxplot(outlier.shape = NA) +
+  ggplot2::geom_jitter(
+    width = 0.2,
+    size = 1,
+    alpha = 0.5
+  ) +
+  ggplot2::scale_color_brewer(palette = "Greys") +
+  bw_theme +
+  ggplot2::labs(
+    title = "Boxplots of SES MCA Variables Across Scenarios",
+    subtitle = "Includes original data and data with artificial positive and negative skew",
+    x = "Variable Groups",
+    y = "MCA Score"
+  ) +
+  ggplot2::theme(
+    axis.title.x = ggplot2::element_text(face = "bold"),
+    axis.title.y = ggplot2::element_text(face = "bold")
+  )
+```
+
 ## Summary stats for original vs altered data
 
 ```{r message=FALSE, warning=FALSE, include=FALSE}
