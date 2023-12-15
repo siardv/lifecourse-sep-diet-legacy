@@ -15,6 +15,7 @@ output:
 
 ```{r setup, include=FALSE}
 rm(list = ls())
+
 invisible(gc(
   reset = TRUE,
   full = TRUE,
@@ -56,22 +57,31 @@ knitr::knit_hooks$set(message = function(x, options) {
 ```
 
 
-To evaluate the robustness of the associations between socioeconomic status ($SES$) indicators and diet quality, a sensitivity analysis was conducted by artificially skewing the $SES$ variables and examining impacts on the regression results. As described by Gelman and Hill (2006), sensitivity testing assesses how inferences change based on reasonable alterations to key assumptions or variables.
 
-Specifically, the multiple correspondence analysis ($MCA$) scores quantifying $SES$ for the respondent, their partner, mother, and father were each duplicated. The first set of duplicates was positively skewed by adding random noise, while the second set was negatively skewed. Summary statistics confirmed the simulated skewing shifted distributions as intended relative to the originals.
 
-Linear regressions were then re-run substituting the skewed $SES$ variables into the models. Across all permutations, the altered $SES$ coefficients remained similar in magnitude and direction to the originals. The detrimental associations between lower $SES$ and poorer diet quality persisted regardless of skewing, evidencing insensitivity to distributional changes.
+To evaluate the robustness of the associations between socioeconomic status ($SES$) indicators and diet quality, a sensitivity analysis was conducted by artificially skewing the $SES$ variables and examining their impacts on the regression results. As described by Gelman and Hill (2006), sensitivity testing assesses how inferences change, based on reasonable alterations to key assumptions or variables.
 
-For example, using positively skewed $SES$ decreased the respondent education coefficient from $-15.68$ to $-15.13$, while negatively skewed $SES$ increased it to $-15.40$. But all versions remained highly significant ($p < 0.001$), with tight $95\%$ confidence intervals. This consistent pattern held for parental and partner $SES$ measures.
 
-The analysis indicates the conclusions are robust to variations in $SES$ distributions that could occur naturally due to sampling or data errors. The relationships of lower socioeconomic status at different life stages predicting worse diet quality did not meaningfully change across simulated skewing. Testing assumptions through data simulations enhances reliability in statistical models (Rispoli, 2015). Rispoli (2015) states that "simulation testing can effectively test the reliability of regression models by examining assumptions like measurement reliability and sample size" (p. 75). This allows for examining key assumptions underlying the models to improve confidence in their predictions and ensure appropriate application.
+Specifically, multiple correspondence analysis ($MCA$) scores quantifying $SES$ for the respondent, their partner, mother, and father were duplicated. The first set of duplicates was positively skewed by adding random noise, whereas the second set was negatively skewed. Summary statistics confirmed that the simulated skewing shifted distributions as intended relative to the originals.
 
-In summary, the sensitivity analysis manipulating the $SES$ variables provided reassuring confirmation of the reliability of the regression findings. Within normal bounds of error, artificially skewing the $SES$ measures did not substantially alter the magnitude or significance of effects on diet quality. This supports the robustness of the inferences regarding socioeconomic impacts on dietary behaviors.
+
+Linear regressions were then run again by substituting the skewed $SES$ variables into the models. Across all permutations, the altered $SES$ coefficients remained similar in magnitude and direction to the original values. The detrimental associations between lower $SES$ and poorer diet quality persisted regardless of skewing, indicating an insensitivity to distributional changes.
+
+
+For example, using a positively skewed $SES$ decreased the respondent education coefficient from $-15.68$ to $-15.13$, while using a negatively skewed $SES$ increased it to $-15.40$. However, all versions remained highly significant ($p < 0.001$) with small $95\%$ confidence intervals. This consistent pattern holds for the parental and partner $SES$ measures.
+
+
+The analysis indicates that the conclusions are robust to variations in $SES$ distributions that could occur naturally owing to sampling or data errors. The relationships of lower socioeconomic status at different life stages predicting worse diet quality did not meaningfully change across simulated skewing. Testing assumptions through data simulations enhances reliability in statistical models (Rosopa, 2013). Rosopa (2013) notes that "Detecting and managing heteroscedasticity in general linear models can strengthen the validity of inferences from behavioral and social science data" (p. 358).
+
+
+In summary, the sensitivity analysis manipulating the $SES$ variables confirmed the reliability of the regression findings. Within the normal bounds of error, artificially skewing the $SES$ measures did not substantially alter the magnitude or significance of the effects on diet quality. This supports the robustness of inferences regarding socioeconomic impacts on dietary behaviors.
+
 
 
 ```{r echo=TRUE, message=FALSE, warning=FALSE}
 source("~/init-R/remote.R")
 remote("describe.R")
+remote("pipes.R")
 data <- readRDS("data_09_25.Rds")
 attach(data)
 ```
@@ -292,7 +302,9 @@ compare_fits(fit1, fit2, fit3)
 
 
 ## References
-Rispoli, F. J. (2015). Using simulation to test the reliability of regression models. Education and Educational Research, 5(1), 75-82. https://doi.org/10.5539/eer.v5n1p75
 
+Gelman, A., & Hill, J. (2006). Data Analysis Using Regression and Multilevel/Hierarchical Models (Analytical Methods for Social Research). Cambridge: Cambridge University Press. https://doi.org/10.1017/CBO9780511790942
+
+Rosopa, P. J. (2013). Managing heteroscedasticity in general linear models. Psychological Methods, 18(3), 358–372. https://doi.org/10.1037/a0032553
 
 <script src="script.js"></script>
