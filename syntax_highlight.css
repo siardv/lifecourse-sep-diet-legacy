@@ -1,0 +1,251 @@
+pre {
+  background: #263238 !important;
+  font-family: "Consolas", Monaco, monospace !important;
+  line-height: 24px !important;
+  color: #b2dfee !important;
+  border-radius: 10px !important;
+  overflow: hidden !important;
+  margin: 15px 0 !important;
+  padding: 10px 10px !important;
+}
+
+code {
+  font-family: Consolas, monospace !important;
+  color: #B22222;
+  font-size: 95% !important;
+}
+
+code span.al {
+  font-weight: bold;
+  color: #ff5555;
+}
+
+code span.an {
+  color: #707880;
+}
+
+code span.at {
+  color: #ed90a4;
+}
+
+code span.bn {
+  color: #b294bb;
+}
+
+code span.bu {
+  color: #dd925f;
+}
+
+code span.ch {
+  color: #b2ba68;
+}
+
+code span.co {
+  color: #707880;
+}
+
+code span.cv {
+  color: #707880;
+}
+
+code span.cn {
+  color: #b294bb;
+}
+
+code span.cf {
+  color: #dd925f;
+}
+
+code span.dt {
+  color: #ed90a4;
+}
+
+code span.dv {
+  color: #b294bb;
+}
+
+code span.do {
+  color: #707880;
+}
+
+code span.er {
+  color: #81a2be;
+}
+
+code span.ex {
+  font-weight: bold;
+  color: #dd925f;
+}
+
+code span.fl {
+  color: #b294bb;
+}
+
+code span.fu {
+  color: #81a2be;
+}
+
+code span.im {
+  color: #b2ba68;
+}
+
+code span.in {
+  color: #81a2be;
+}
+
+code span.kw {
+  color: #ed90a4;
+}
+
+code span.op {
+  color: #81a2be;
+}
+
+code span.pp {
+  color: #dd925f;
+}
+
+code span.re {
+  color: #707880;
+}
+
+code span.sc {
+  color: #b294bb;
+}
+
+code span.ss {
+  color: #b2ba68;
+}
+
+code span.st {
+  color: #b2ba68;
+}
+
+code span.va {
+  color: #f8f8f2;
+}
+
+code span.vs {
+  color: #b2ba68;
+}
+
+code span.wa {
+  color: #81a2be;
+}
+
+.bracket {
+  color: #ed90a4 !important;
+}
+
+.background {
+  color: #263238 !important;
+}
+
+.number {
+  color: #b294bb !important;
+}
+
+.function {
+  color: #dd925f !important;
+}
+
+.functioncall {
+  color: #81a2be !important;
+}
+
+.doublecolon {
+  color: #81a2be !important;
+}
+
+.exposition-pipe {
+  color: #81a2be !important;
+}
+
+.string {
+  color: #b2ba68 !important;
+}
+
+.equals {
+  color: #81a2be !important;
+}
+
+.tilde {
+  color: #81a2be !important;
+}
+
+.ampersand {
+  color: #81a2be !important;
+}
+
+.minus {
+  color: #81a2be !important;
+}
+
+.plus {
+  color: #81a2be !important;
+}
+
+.slash {
+  color: #81a2be !important;
+}
+
+.asterisk {
+  color: #81a2be !important;
+}
+
+.else {
+  color: #dd925f !important;
+}
+
+.if {
+  color: #dd925f !important;
+}
+
+.pipe {
+  color: #81a2be !important;
+}
+
+.dollarsign {
+  color: #81a2be !important;
+}
+
+.comma {
+  color: #81a2be !important;
+}
+
+.argument {
+  color: #f8f8f2 !important;
+}
+
+.roxygencomment {
+  color: #9e9e9e !important;
+}
+
+.formalargs {
+  color: #f8f8f2 !important;
+}
+
+.eqformalargs {
+  color: white !important;
+}
+
+.assignement {
+  color: #81a2be !important;
+}
+
+.package {
+  color: #dd925f !important;
+}
+
+.slot {
+  font-style: italic;
+  color: #b2dfee !important;
+}
+
+.symbol {
+  color: #c3c7c5 !important;
+}
+
+.source {
+  color: #dd925f !important;
+}

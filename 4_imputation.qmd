@@ -1,0 +1,473 @@
+---
+title: "Imputation of Missing Data"
+author: "Siard van den Bosch"
+date: last-modified
+---
+
+```{r}
+#| label: setup
+#| echo: FALSE
+#| include: FALSE
+
+rm(list = ls())
+invisible(gc(full = TRUE))
+
+options(digits = 3, scipen = 100, knitr.kable.NA = "—")
+knitr::opts_knit$set(
+  progress = FALSE,
+  verbose = FALSE,
+  cache = FALSE,
+  knitr.table.format = "html",
+  escape = FALSE,
+  digits = 3,
+  row.names = FALSE
+)
+```
+
+```{r}
+#| label: load-functions
+#| echo: FALSE
+#| include: FALSE
+functions <- c("pipes", "load_most_recent_rds", "remove_columns_by_name", "calculate_imputation_metrics", "convert_to_factor", "frequency_table", "density_difference_plot", "describe", "numeric_data_frame", "save_rds", "combine_imputed_data", "two_item_reliability", "summarize_missing_values", "beautify_names", "copy_labels", "format_p_value", "footnote", "print_kable", "factor_analysis", "plot_difficulty_distributions")
+purrr::walk(functions, ~ source(paste0("functions/", .x, ".R"), local = FALSE))
+use_saved_data <- TRUE
+```
+
+### Imputation
+
+After recoding and transforming variables, the dataset is ready for imputation. The missing data are imputed using the `missForest` package, which employs a random forest algorithm to estimate missing values. The `missForest` function imputes missing data by constructing a random forest model for each variable with missing values. The model predicts missing values based on the observed values of other variables. The imputation process is repeated iteratively until convergence, with the final imputed values replacing the missing data. The imputation model is trained on the entire dataset, ensuring that the imputed values are consistent with the overall data distribution.
+
+```{r}
+#| label: imputation-setup
+clean_data <- haven::read_sav("data/data_without_outliers.sav") # load cleaned dataset
+
+row_names <- setdiff( # get row names minus removed indices
+  1:nrow(clean_data),
+  attr(clean_data, "removed_indices")
+)
+
+processed_data <- clean_data %>%
+  remove_columns_by_name("idnummer", "HH_members", "outlier") %>% # remove specific columns
+  haven::zap_labels() %>% # remove value labels
+  droplevels() %>% # drop unused factor levels
+  as.data.frame() %>% # convert to data frame
+  dplyr::mutate(dplyr::across(dplyr::where(~ length(unique(.)) <= 5), as.factor)) # convert low-cardinality vars to factors
+```
+
+```{r}
+#| label: imputation-global-variablewise
+num_cores <- parallel::detectCores() - 1 # detect available cores
+cluster <- parallel::makeCluster(num_cores) # create parallel cluster
+doParallel::registerDoParallel(cluster) # register parallel backend
+
+purrr::iwalk(c("imputed_global", "imputed_variablewise"), ~ { # iterate over imputation types
+  assign(.x, if (!use_saved_data) { # check whether to load or perform new imputation
+    processed_data %>%
+      missForest::missForest( # run missForest imputation
+        ntree = 1000, # set number of trees
+        mtry = max(ceiling(sqrt(ncol(.))), ncol(.) / 3), # set mtry parameter
+        maxiter = 15, # max iterations for imputation
+        verbose = TRUE, # display progress
+        variablewise = (.x == "imputed_variablewise"), # set variablewise if appropriate
+        parallelize = "variables" # parallelize imputation by variables
+      ) %>%
+      save_rds(name = .x, dir = "data") # save imputation results
+  } else {
+    load_most_recent_rds(.x, "data") # load saved imputation if use_saved_data is TRUE
+  }, envir = .GlobalEnv) # assign result to global environment
+})
+
+parallel::stopCluster(cluster) # stop the parallel cluster
+doParallel::stopImplicitCluster()
+```
+
+
+Next, we will evaluate the reliability of the imputation for each variable in order to determine which variables to utilize in subsequent data analysis. The `missForest` function can return out-of-bag errors for each variable separately, rather than aggregating across the entire data matrix, through use of the argument `variablewise = TRUE` when calling the `missForest` function.
+
+
+```{r}
+#| label: imputation-metrics
+#| fig.cap: "Out-of-bag error for each variable separately (n=1000 trees)"
+footnote_text <- paste(
+  "MSE = mean squared error;",
+  "NRMSE = normalized root mean squared error;",
+  "PFC = proximity of fit coefficient.",
+  "Lower MSE and NRMSE values and higher PFC values indicate superior imputation accuracy.",
+  "MSE quantifies average squared differences between imputed and original values.",
+  "NRMSE standardizes the MSE using the range of actual values.",
+  "PFC measures how well imputed values' distribution matches the originals.",
+  "This table presents out-of-bag, single variable imputation model results using 1000 trees.",
+  "See <a href=\"https://doi.org/10.1093/bioinformatics/btg287\"",
+  "target=\"_blank\" title=\"View citation\">Oba et al. (2003)</a>",
+  "for the continuous part of the imputed data."
+)
+
+imputed_variablewise %$%
+  data.frame(erm = names(.$OOBerror), oob = .$OOBerror, var = names(.$ximp)) %>% # create df from OOB errors and variables
+  rbind(data.frame(erm = "", oob = "", var = "")) %>% # add empty row for separation
+  rbind(imputed_global$OOBerror %>% data.frame(erm = names(.), oob = ., var = "Global")) %>% # add global OOB errors
+  dplyr::mutate(oob = as.numeric(oob)) %>% # convert OOB errors to numeric
+  knitr::kable(
+    col.names = c("Error Metric", "OOB imputation error", "Variable"),
+    align = "rll",
+    row.names = FALSE
+  ) %>%
+  footnote(footnote_text) %>%
+  print_kable()
+```
+
+The out-of-bag error provides insight into the average error in predicting a variable using other features in the data. This error reveals the efficacy of imputation, with lower values indicating a greater predictive accuracy. The mean squared error (MSE) calculates the magnitude of the imputation errors for continuous variables. Again, smaller values denote a higher precision. The proximity of the fit coefficient (PFC) also assesses the imputation performance, with larger values reflecting superior quality.
+Taken together, these metrics quantify the accuracy of estimating missing data from the available information. Lower out-of-bag errors, NRMSE values, and higher PFC scores indicate more reliable imputation. These statistics enable the evaluation of different techniques and the selection of an approach that generates the most credible substituted values. Benchmarking methods on these indices can provide researchers with greater confidence in the completed datasets.
+
+```{r}
+#| label: imputation-metrics-continuous
+#| fig.cap: "Imputation metrics for numerical variables"
+processed_data_num <- names(processed_data)[sapply(processed_data, is.numeric)]
+footnote_text <- paste(
+  "n=(", nrow(processed_data), ");",
+  "Correlation is Pearson's correlation coefficient.",
+  "Bias is the mean difference between imputed and original values.",
+  "Variance is the variance of imputed values.", "Calculations exclude missing values.",
+  "Lower values indicate better imputation performance."
+)
+col_names <- col.names <- c("Variable", "Method", "Correlation", "Bias", "Variance")
+processed_data_num %>%
+  purrr::map_df(
+    ~ calculate_imputation_metrics(
+      processed_data,
+      imputed_global,
+      imputed_variablewise,
+      .x
+    )
+  ) %>%
+  dplyr::mutate(variable = ifelse(duplicated(variable), "", variable)) %>%
+  knitr::kable(col.names = col_names) %>%
+  footnote(footnote_text) %>%
+  print_kable()
+```
+
+
+```{r}
+#| label: density-difference-plots
+#| fig-cap: "Density Difference Plots comparing Original and Imputed Data for continuous variables"
+plot_list <- purrr::map(
+  processed_data_num,
+  ~ density_difference_plot(
+    original_data = processed_data,
+    global_imputed = imputed_global,
+    variablewise_imputed = imputed_variablewise,
+    variable = .x,
+    plot_title = paste0("Density Difference Plot for '", .x, "'")
+  )
+)
+
+par(mfrow = c(ceiling(length(plot_list) / 2), 2), mar = c(4, 4, 2, 1))
+for (p in plot_list) print(p)
+par(mfrow = c(1, 1), mar = c(5, 4, 4, 2) + 0.1)
+```
+
+
+```{r}
+#| label: comparison-imputed-data
+#| tbl-cap: "Comparison of initial and imputed data"
+#| message: false
+#| warning: false
+data_summaries <- list(processed_data, imputed_global$ximp) %>%
+  lapply(numeric_data_frame) %>%
+  lapply(describe, print_only = FALSE) %>%
+  lapply(function(df) dplyr::select(df, -n)) %>%
+  setNames(c("initial", "imputed"))
+
+comparison <- versus::compare(data_summaries$initial, data_summaries$imputed, by = variable) %>%
+  versus::value_diffs_stacked(column = tidyselect::everything()) %>%
+  dplyr::filter(column != "n") %>%
+  dplyr::mutate(diff = val_b - val_a, .after = "val_b") %>%
+  dplyr::arrange(variable)
+
+comparison %<>% dplyr::filter(column != "normality")
+
+pack_row_indeces <- unique(comparison$variable) %>%
+  beautify_names() %>%
+  setNames(object = rep(unique(table(comparison$variable)), length(.)))
+
+comparison %>%
+  remove_columns_by_name("variable") %>%
+  knitr::kable(
+    col.names = c("Metric", "Initial", "Imputed", "Difference"), digits = 5
+  ) %>%
+  kableExtra::pack_rows(
+    index = pack_row_indeces
+  )
+```
+
+### Combining imputed data
+
+The imputed data is combined into a single dataset, with continuous variables taken from the global imputation and categorical variables from the variable-wise imputation.
+The combined imputed dataset is ready for use in subsequent analyses.
+
+```{r}
+#| label: combine-imputed-data
+var_types <- list(
+  continuous = c(
+    "DHD_index", "DHD_KCAL", "age", "income_hh",
+    "isei08", "isei08_father", "isei08_mother", "isei08_partner",
+    "adults_hh", "num_children_hh", "bedrooms"
+  ),
+  categorical = c(
+    "diff_pay_bills", "diff_live_income", "HH_comp",
+    "smoking_status", "normal_week", "home_owner", "woman", "partner_status",
+    "education", "education_partner", "education_father", "education_mother",
+    "brc14", "brc14_father", "brc14_mother", "brc14_partner",
+    "isco08r", "isco08r_father", "isco08r_mother", "isco08r_partner"
+  )
+)
+imputed_data <- var_types %>%
+  combine_imputed_data(
+    imp_glob = imputed_global,
+    imp_varw = imputed_variablewise
+  ) %>%
+  copy_labels(source = clean_data)
+```
+
+
+##### Recoding and transforming variables after imputation
+
+```{r}
+#| label: recoding-transforming-after-imputation
+# Net household income is equivalised to account for differences in household size. The equivalised income is calculated by adding the household size to the net household income. It is then categorised into four groups: 0-1300 €, 1301-2600 €, 2601-4000 €, and 4001+ €.
+imputed_data %<>%
+  dplyr::mutate(
+    income_hh_num = dplyr::recode(
+      income_hh,
+      `1` = 600,
+      `2` = 1500,
+      `3` = 2200,
+      `4` = 3300,
+      `5` = 4000,
+      .missing = NA_real_
+    )
+  )
+
+# The equivalised income is calculated by dividing the household’s total income from all sources by its equivalent size,
+# The equivalent size is the sum of the weights of all the members of a given household
+# 1,0 to the first adult;
+# 0,5 to the second and each subsequent person aged 14 and over;
+# 0,3 to each child aged under 14.
+eq_size <- with(imputed_data, 1 + 0.5 * (adults_hh - 1) + 0.3 * num_children_hh)
+hh_size <- with(imputed_data, adults_hh + num_children_hh)
+imputed_data <- transform(imputed_data,
+  eq_size = eq_size,
+  hh_size = hh_size,
+  # Values below zero indicate more crowding; more people than bedrooms.
+  # Values above zero indicate less crowding; fewer people than bedrooms.
+  crowding = bedrooms / hh_size,
+  income_hh_eq = income_hh_num / eq_size,
+  children_yn = as.numeric(num_children_hh > 0)
+)
+
+imputed_data %<>% dplyr::mutate(
+  income_hh_eq_rec = cut(
+    income_hh_eq,
+    breaks = c(0, 1300, 2601, 4001, Inf),
+    labels = c("0-1300 €", "1301-2600 €", "2601-4000 €", "4001+ €"),
+    right = FALSE,
+    ordered_result = TRUE
+  )
+)
+attr(imputed_data$income_hh_num, "label") <-
+  "Minimum Monthly Net Household Income in Euros (category lower bound)"
+
+# Net household equivalised income level
+attr(imputed_data$income_hh_eq, "label") <-
+  "Net Household Equivalised Income Level (category)"
+
+# rename variables
+imputed_data %<>% dplyr::rename(
+  education_self = education,
+  occupation_self = isei08,
+  occupation_father = isei08_father,
+  occupation_mother = isei08_mother,
+  occupation_partner = isei08_partner,
+  dhd_kcal = DHD_KCAL,
+  dhd_index = DHD_index
+)
+```
+
+##### Financial Difficulties (scale)
+
+Financial difficulties are measured using two variables: difficulty living from income and paying regular bills. These variables have already been recoded to have a meaningful zero point.
+
+Financial difficulties are combined into a single scale by summing the two variables measuring difficulty living from income and difficulty paying regular bills. The scale ranges from 0 to 6, with higher values indicating more severe financial difficulties.
+
+```{r}
+#| label: financial-difficulties-scale
+normalize <- function(x) {
+  (x - min(x)) / (max(x) - min(x))
+}
+
+imputed_data %<>% dplyr::mutate(
+  income_difficulty_norm = normalize(diff_live_income),
+  bills_difficulty_norm = normalize(diff_pay_bills)
+)
+```
+
+```{r}
+#| label: financial-difficulties-distribution
+#| tbl-cap: "Distribution of Financial Difficulties"
+#| message: false
+#| warning: false
+diff_vars <- c("diff_live_income", "diff_pay_bills")
+diff_df <- imputed_data[diff_vars]
+
+diff_df %>%
+  setNames(c(
+    "Difficulty living from income",
+    "Difficulty paying regular bills"
+  )) %>%
+  purrr::map_df(~ round(.x, 2)) %$%
+  tableone::CreateTableOne(names(.), data = convert_to_factor(., names(.))) %>%
+  print(printToggle = FALSE, showAllLevels = TRUE) %>%
+  knitr::kable(
+    caption = "Distribution of Financial Difficulties",
+    digits = 2,
+    format = "html",
+    col.names = c("value", "n (%)")
+  )
+```
+
+```{r}
+#| label: factor-analysis-financial-difficulties
+#| fig-cap: "Factor analysis and Cronbach's alpha for financial difficulties"
+fw <- factor_analysis(numeric_data_frame(diff_df),
+  rotate = "oblimin", # factors correlate (r=0.72)
+  fm = "ml" # continuous data
+) %$%
+  setNames(as.numeric(.$loadings), rownames(.$loadings)) %>%
+  as.list()
+```
+
+```{r}
+#| label: cronbachs-alpha-financial-difficulties
+#| tbl-cap: "Cronbach's Alpha for Financial Difficulties"
+#| message: false
+#| warning: false
+alpha_res <- psych::alpha(numeric_data_frame(diff_df))
+
+names(alpha_res$total) <- c(
+  "$\\text{raw}_\\alpha$",
+  "$\\text{std.}\\alpha$",
+  "$G6(\\text{smc})$",
+  "$\\text{average}_r$",
+  "$S/N$",
+  "$\\text{ase}$",
+  "$\\text{mean}$",
+  "$\\text{sd}$",
+  "$\\text{median}_r$"
+)
+
+knitr::kable(alpha_res$total) %>%
+  kableExtra::footnote(
+    c(
+      "$\\text{raw}_\\alpha$: Raw Cronbach's alpha",
+      "$\\text{std.}\\alpha$: Standardized Cronbach's alpha",
+      "$G6(\\text{smc})$: Guttman's Lambda 6 (smc)",
+      "$\\text{average}_r$: Mean inter-item correlation",
+      "$S/N$: Signal-to-noise ratio",
+      "$\\text{ase}$: Average standard error",
+      "$\\text{mean}$: Mean item correlation",
+      "$\\text{sd}$: Standard deviation of item correlations",
+      "$\\text{median}_r$: Median inter-item correlation"
+    ),
+    escape = FALSE,
+    footnote_as_chunk = TRUE
+  )
+```
+
+```{r}
+#| label: financial-difficulties-factor-reliability
+#| tbl-cap: "Reliability Estimates (Cronbach's Alpha, Pearson _r_, Spearman-Brown) for SEP Measures."
+footnote_text <- paste(
+  "Reliability estimates were derived from Cronbach's alpha,",
+  "Pearson correlation coefficient,",
+  "and Spearman-Brown prediction formula using Pearson <i>r</i>.",
+  "The Spearman-Brown coefficient is recommended for two-item scales,",
+  "as it accounts for the number of items in the scale",
+  "<a href='http://dx.doi.org/10.1007/s00038-012-0416-3' target='_blank'",
+  "title='The reliability of a two-item scale: Pearson, Cronbach, or Spearman-Brown?'>",
+  "(Eisinga et al., 2012)</a>.",
+  "Values closer to 1 indicate higher reliability."
+)
+two_item_reliability(diff_df) %>%
+  knitr::kable() %>%
+  footnote(footnote_text) %>% 
+  print_kable()
+```
+
+```{r}
+#| label: histogram-financial-difficulties
+#| fig-cap: "Factor-Weighted Financial Difficulties"
+diff_df %<>%
+  dplyr::mutate(
+    financial_difficulties =
+      (diff_live_income * fw$diff_live_income) +
+        (diff_pay_bills * fw$diff_pay_bills)
+  )
+
+attr(diff_df$financial_difficulties, "label") <- "Financial difficulties"
+```
+
+```{r}
+#| label: financial-difficulties-distribution-plot
+#| fig-cap: "Distribution of Financial Difficulties, Difficulty Living from Income, and Difficulty Paying Regular Bills"
+numeric_data_frame(diff_df) %>%
+  dplyr::rename(
+    "difficulty_living_from_income" = diff_live_income,
+    "difficulty_paying_regular_bills" = diff_pay_bills
+  ) %>%
+  plot_difficulty_distributions(
+    columns = c(
+      "difficulty_living_from_income",
+      "difficulty_paying_regular_bills",
+      "financial_difficulties"
+    ),
+    labels = c(
+      "Living From Income",
+      "Paying Regular Bills",
+      "Financial Difficulties [scale]"
+    )
+  )
+```
+
+```{r}
+#| label: save-imputed-data
+#| echo: false
+imputed_data$financial_difficulties <- diff_df$financial_difficulties
+haven::write_sav(imputed_data, "data/imputed_data.sav")
+```
+
+
+:::{.column-page}
+```{r}
+#| label: descriptive-statistics-imputed-data
+#| tbl-cap: "Descriptive Statistics for Imputed Data"
+#| message: false
+tbl <- describe(
+  imputed_data,
+  add_footnote = TRUE,
+  latex = TRUE,
+  normality = TRUE,
+  print_only = FALSE,
+  exclude = "idnummer"
+) %>% dplyr::select(-n, -normality, -p_value)
+
+col_names <- tth::tth(c(
+    "$\\ $", "$\\bar{x}$", "$\\text{Min.}$", "$\\text{Max.}$",
+    "$SD$", "$\\text{Skewnes}$", "$\\text{Kurtosis}$", "$SE$"
+))
+
+footnote_text <- sprintf("<i>N</i>=%s", nrow(imputed_data))
+knitr::kable(tbl, col.names = col_names, align = "lllr", escape = FALSE) %>%
+  footnote(footnote_text) %>% 
+  print_kable()
+```
+:::

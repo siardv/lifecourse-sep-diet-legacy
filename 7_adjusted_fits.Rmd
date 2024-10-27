@@ -1,0 +1,507 @@
+---
+title: "Robust Regression Assumption Testing (adjusted)"
+author: "Siard van den Bosch"
+date: last-modified
+---
+
+```{r}
+#| label: setup
+#| echo: FALSE
+#| include: FALSE
+
+rm(list = ls()) # remove all objects from env
+invisible(gc(full = TRUE)) # free up memory
+
+options(digits = 3, scipen = 100, knitr.kable.NA = "—") # set global options
+knitr::opts_knit$set( # configure knitr options
+  progress = FALSE,
+  verbose = FALSE,
+  cache = FALSE,
+  knitr.table.format = "html",
+  escape = FALSE,
+  digits = 3,
+  row.names = FALSE
+)
+```
+
+```{r}
+#| label: load-project-resource
+#| echo: FALSE
+functions <- c("pipes", "format_p_value", "combined_qq_plot", "scale_location_plot", "cooks_distance_plot", "leverage_plot", "normality_tests", "calculate_max_vif", "cooks_distance_df", "standardized_residuals", "cooks_distance_lmrob", "load_most_recent_rds", "save_rds", "remove_columns_by_name", "t_test", "chisq_test", "numeric_data_frame", "beautify_names", "structure_model_fits", "describe", "highlight_function", "footnote", "print_kable")
+purrr::walk(functions, ~ source(file.path("functions", paste0(.x, ".R"))))
+
+# adjusted model fits
+adjusted_data <- load_most_recent_rds("adjusted_data", "data")
+numeric_djusted_data <- numeric_data_frame(adjusted_data)
+adjusted_fits <- load_most_recent_rds("adjusted_fits_[0-9]", "data") %>%
+  setNames(paste0("model_", seq(.)))
+lmrob_fits <- purrr::map(adjusted_fits, ~ .x$robust$model)
+```
+
+```{r eval=FALSE, message=FALSE, warning=FALSE, include=FALSE}
+purrr::iwalk(functions[1:4], ~highlight_function(.x))
+```
+
+# Assumption Testing for Robust Regression Models
+
+## Normality of Errors
+
+The normality of errors represents a prevalent assumption in statistical analyses. Violating this assumption can invalidate inferences derived from the model. However, robust regression techniques such as MM-estimation exhibit less sensitivity to deviations from normality than ordinary least squares (Kudraszow et al., 2010; Salibian-Barrera et al., 2006).
+
+We evaluated the normality of the errors by examining Normal Q-Q plots (Figure 1). An approximately linear pattern in these plots indicated that the errors adhered to a normal distribution. Additionally, we implemented formal normality tests, including the Anderson-Darling, Shapiro-Wilk, Lilliefors, and Cramer-von Mises tests (Table X). Low $p$-values (p ≤ 0.05) from these tests imply departure from normality.
+
+```{r}
+#| label: normality-table-attributes
+#| message: false
+#| warning: false
+footnote_text <- paste(
+  "The low probabilities ($p \\le 0.05$) demonstrated in these statistical results",
+  "provide evidence against the null hypothesis of normality in",
+  "the residuals of the evaluated regression models.",
+  "Normality is a favorable assumption for these methods.",
+  "Specifically, the Anderson-Darling, Shapiro-Wilk, Lilliefors,",
+  "and Cramer-von Mises tests are variations of normality tests that evaluate",
+  "whether a sample of data adheres to a normal distribution.",
+  "These tests differ in their precise specifications of null and alternative",
+  "hypotheses as well as in the mathematical weightings applied during",
+  "the measurement of deviations from the expected normal curve."
+)
+
+column_names <- c(
+  "Model",
+  "Anderson-Darling",
+  "Shapiro-Wilk",
+  "Lilliefors (Kolmogorov-Smirnov)",
+  "Cramer-von Mises"
+)
+```
+
+```{r}
+#| label: normality-assessment
+#| message: false
+#| warning: false
+normality_tests_data_frame <- lmrob_fits %>%
+  purrr::map2_dfr(seq_along(.), ~ data.frame(.y, normality_tests(.x)))
+
+normality_tests_table <- normality_tests_data_frame %>% 
+  knitr::kable(col.names = column_names) %>%
+footnote(footnote_text)
+```
+
+```{r}
+#| label: normal-qq-plots
+#| fig-height: 5
+#| fig-width: 10
+#| fig-cap: "Normal Q-Q plots for robust regression models"
+#| message: false
+#| warning: false
+combined_qq_plot(lmrob_fits, as.list(as.character(seq_along(lmrob_fits))),
+  plot_title = "Normal Q-Q plots for robust regression models (MM-estimation)"
+)
+```
+
+The Q-Q plots and normality tests indicate that the errors are approximately normally distributed for most of the models. However, a limitation is that normality tests can be sensitive to sample size, with even small departures flagged as significant in large samples (Razali & Wah, 2011).
+
+## Homoscedasticity
+
+
+The assumption of homoscedasticity, that the errors exhibit constant variance across predicted values, was evaluated. Although robust regression techniques demonstrate increased resilience to heteroscedastic errors, assessing this assumption remains prudent (Western et al. 1995). Homoscedasticity was examined using scale-location plots and the Breusch-Pagan test. Scale-Location plots graph the square root of standardized residuals against fitted values; a horizontal distribution of randomly dispersed data points lends support to homoscedasticity. The Breusch-Pagan test compares residual variances across predictor ranges, with low p-values (p ≤ 0.05) indicating heteroscedasticity. Scale-Location plots (Figure 2) depicted a horizontal alignment of residuals, and the Breusch-Pagan statistic (Table X).
+
+```{r}
+#| label: bp-table-attributes
+#| message: false
+#| warning: false
+column_names <- c("Model", "Statistic", "$p$-value")
+p_value_note <- c("$^{***}p \\lt 0.001$", "$^{**}p \\le 0.01$", "$^{*}p \\le 0.05$")
+footnote_text <- paste(
+  p_value_note, "Low probability ($p \\le 0.05$) means the",
+  "null hypothesis is rejected in favor of heteroscedastic residuals,",
+  "violating the favorable assumption of homoscedasticity."
+)
+```
+
+```{r}
+#| label: bp-test-for-heteroscedasticity
+#| message: false
+#| warning: false
+bptest_results <- lmrob_fits %>%
+  # Calculate Breusch-Pagan test for heteroscedasticity
+  purrr::map2_dfr(seq_along(.), ~ {
+    x <- lmtest::bptest(.x)
+    data.frame(
+      Model = .y,
+      Statistic = x$statistic,
+      p_value = format_p_value(x$p.value, TRUE)
+    )
+  })
+
+knitr::kable(
+  # Create a table with the results
+  bptest_results,
+  format = "html",
+  digits = 4, align = "l",
+  row.names = FALSE,
+  col.names = column_names
+) %>%
+  kableExtra::footnote(
+    footnote_text,
+    footnote_as_chunk = TRUE
+  )
+```
+
+```{r}
+#| label: scale-location-plots
+#| fig-height: 15
+#| fig-width: 15
+#| fig-cap: "Scale-Location plots for robust regression models"
+#| message: false
+#| warning: false
+
+scale_location_plot
+lmrob_fits %>%
+  purrr::map2(.y = beautify_names(names(.)), ~ scale_location_plot(.x, .y)) %>%
+  gridExtra::grid.arrange(grobs = ., ncol = 2)
+```
+
+Examinations of scale-location plots and Breusch-Pagan tests were conducted to assess heteroscedasticity and homoscedasticity assumptions for the models under analysis. The scale-location plots graphically depict the spread of residuals across the range of predicted values. Breusch-Pagan tests provide a statistical test for the presence of heteroscedasticity.
+
+
+## Linearity
+
+Linearity is the assumption that the relationship between the predictors and response variable is linear. Nonlinear relationships can bias the model results, even when using a robust estimation. It is important to check for linearity before conducting an analysis (Özdemir et al., 2021).
+
+Linearity was assessed using component and partial residual plots (not shown). These plots display the relationship between each predictor and the residuals or partial residuals (residuals plus predictor effect). The nonlinear pattern in these plots suggests violation of the linearity assumption. The transformation of the predictors may be necessary to achieve linearity.
+
+## Independence of Errors
+
+The assumption of error independence, also known as the absence of autocorrelation, suggests a lack of correlation between the errors. Autocorrelated errors can inflate the observed variability and distort the statistical inferences derived from the model (Darwish et al., 2015).
+
+
+We tested for independence of errors utilizing the Durbin-Watson test (Table X). This test compares the residuals from adjacent observations, with $p$-values less than 0.05 indicating significant autocorrelation.
+
+```{r}
+#| label: dw-test-attributes
+#| message: false
+#| warning: false
+column_names <- c("Model", "Statistic", "$p$-value")
+footnote_text <- paste(
+  "The alternative hypothesis (when $p \\le 0.05$) indicates the presence",
+  "of autocorrelation in the residuals (or disturbances) of the model.",
+  "Autocorrelation violates the assumption of independent errors,",
+  "which is necessary for unbiased and efficient parameter estimates."
+)
+```
+
+```{r}
+#| label: dw-test-table
+#| tbl-cap: "Durbin-Watson test for independence of errors"
+#| message: false
+#| warning: false
+perform_dw_test <- function(fit, model_name) {
+  # Define the function to perform Durbin-Watson test
+  dw_result <- lmtest::dwtest(fit)
+  data.frame(
+    Model = model_name,
+    Statistic = dw_result$statistic,
+    p_value = format_p_value(dw_result$p.value, TRUE)
+  )
+}
+
+dw_test_results <- lmrob_fits %>%
+  # Apply the function to each model fit using purrr::map2_dfr
+  purrr::map2_dfr(seq_along(.), perform_dw_test)
+
+knitr::kable(
+  # Create a kable table with the results
+  dw_test_results,
+  format = "html",
+  digits = 4,
+  align = "l",
+  row.names = FALSE,
+  col.names = column_names
+) %>%
+  kableExtra::footnote(
+    footnote_text,
+    footnote_as_chunk = TRUE
+  )
+```
+
+The Durbin-Watson tests is not reliable for all types of dependence and has low power in small samples (Durbin & Watson, 1950).
+
+## Multicollinearity
+
+
+The assumption of non-multicollinearity among the predictors was evaluated. Multicollinearity occurs when independent variables exhibit high degrees of intercorrelation, which can impede model estimation. Even when imperfect, elevated multicollinearity can inflate standard errors and induce instability in coefficients (Prahutama et al., 2021). Multicollinearity was diagnosed by examining the variance inflation factors (VIFs) derived from the MTest, as presented in Table X. VIFs exceeding 10 are generally indicative of potentially problematic multi-collinearity.
+
+```{r}
+#| label: vif_table_attributes
+#| message: false
+#| warning: false
+vif_df <- load_most_recent_rds("vif_df_unadjusted", "data")
+if (is.null(vif_df)) {
+  vif_df <- lmrob_fits %$%
+    data.frame(
+      seq_along(.),
+      sapply(., calculate_max_vif, nboot = 1000, seed = 123)
+    )
+  save_rds(vif_df, dir = "data", name = "vif_df_unadjusted")
+}
+```
+
+```{r}
+#| label: vif-table
+#| tbl-cap: "Variance inflation factors (VIFs) for assessing multicollinearity"
+#| echo: false
+#| message: false
+#| warning: false
+footnote_text <- paste0(c(
+  "$^a$ Only the largest VIF (Variance Inflation Factor) value is reported for each model.",
+  "VIF values greater than 10 indicate multicollinearity, which can lead to biased and inefficient parameter estimates."
+), collapse = " ")
+column_names <- c("Model", "Max VIF$^a$")
+
+knitr::kable(
+  vif_df,
+  format = "html",
+  digits = 4,
+  align = "l",
+  row.names = FALSE,
+  col.names = column_names
+) %>% kableExtra::footnote(footnote_text, footnote_as_chunk = TRUE)
+```
+
+## Model Specification
+
+Even if all other assumptions are met, the model can be misleading if it is not properly specified. Omitted variable bias, incorrect functional form, and other specification errors can invalidate the conclusions. The RESET test can help detect general model misspecification (Ramsey, 1969).
+
+We performed the RESET test for each model (Table X). This test adds powers of the fitted values to the model and checks if they significantly improve the fit. Low p-values (p ≤ 0.05) indicate potential misspecification, suggesting that the model could be improved by incorporating nonlinear terms.
+
+```{r}
+#| label: reset-test-attributes
+#| message: false
+#| warning: false
+column_names <- c("Model", "Statistic", "df1", "df2", "$p$-value")
+footnote_text <- paste(
+  "The Ramsey Regression Specification Error Test (RESET) evaluates the functional",
+  "form of a model by testing the null hypothesis that the model is specified correctly.",
+  "Significance values below the 0.05 significance level suggest improved model",
+  "fit could be obtained by incorporating nonlinear terms,",
+  "implying that the existing model may be misspecified."
+)
+```
+
+```{r}
+#| label: reset-test
+#| tbl-cap: "Ramsey's RESET test for model specification"
+#| message: false
+#| warning: false
+reset_test_results <- lmrob_fits %>%
+  purrr::map2(
+    seq_along(.),
+    ~ {
+      test_result <- lmtest::resettest(.x)
+      data.frame(
+        Model = .y,
+        Statistic = test_result$statistic,
+        df1 = test_result$parameter[1],
+        df2 = test_result$parameter[2],
+        `p-value` = format_p_value(test_result$p.value, TRUE)
+      )
+    }
+  ) %>%
+  dplyr::bind_rows()
+
+# Create a kable table with the results
+knitr::kable(
+  x = reset_test_results,
+  format = "html",
+  digits = 4,
+  row.names = FALSE,
+  col.names = column_names
+) %>%
+  kableExtra::footnote(
+    footnote_text,
+    footnote_as_chunk = TRUE
+  )
+```
+
+The RESET test, originally proposed by Ramsey in 1969, is considered an omnibus test because it can detect various forms of model misspecification all at once. Specifically, it tests the null hypothesis that the model is correctly specified in terms of its linearity and functional form. Rejecting this null hypothesis suggests some kind of misspecification, but the test itself does not indicate what exactly is wrong with the model. 
+
+This is because mathematically, the RESET test works by adding polynomial terms of the fitted values to the original model as extra regressors. The intuition is that if the original model is properly specified, these extra terms should not have much explanatory power and should be statistically insignificant. However, if the model is misspecified in some manner, these terms may end up being significant as they start to proxy for the mis-specification.
+
+The downside is that since the added terms are just polynomials of the fitted values, they can pick up many different kinds of departures from the original model. So a rejection of the null only signals that something is wrong, but does not diagnose the specific problems like non-linear relationships, omitted variables, incorrect functional form, etc. The mathematical structure essentially casts a wide net to detect model misspecification in general, rather than targeting specific alternatives.
+
+In summary, the RESET test is omnibus in nature, allowing it to catch multiple forms of misspecification at once, but unable to pinpoint the exact issues within the model. Other diagnostics are needed to further investigate the source of any detected model deficiencies.
+
+## Influential Observations
+
+Certain data points have the potential to exert a disproportionate impact on the estimation of model parameters. Such observations, referred to as influential observations, can encompass outliers, data with high leverage values, or instances containing large residuals (Smucler et al., 2017). Although robust regression techniques aim to constrain the influence of outliers, these methods are not immune to the effects of influential observations.
+
+To identify potentially influential observations, we examined Cook's distance plots (Figure 3) and leverage plots (Figure 4). Cook's distance quantifies the alteration to fitted values when each observation is excluded from the model. Values exceeding 0.5 may suggest an influential data point. Leverage measures the distance of an observation from the center of the predictor space, with observations of high leverage capable of strongly influencing the estimated coefficients. Influential observations were investigated through visual analysis of these diagnostic tools.
+
+```{r}
+#| label: cooks-distance-plots
+#| fig-height: 15
+#| fig-width: 15
+#| fig-cap: "Cook's distance plots for influential observations"
+#| message: false
+#| warning: false
+lmrob_fits %>%
+  purrr::map2(
+    beautify_names(names(.)),
+    ~ cooks_distance_plot(.x, adjusted_data, .y)
+  ) %>%
+  gridExtra::grid.arrange(grobs = ., ncol = 2)
+```
+
+Excluding potentially influential observations is crucial because they may introduce bias and impede accurate inferences. To assess the model's sensitivity, suspicious outlier observations were removed and the models were re-estimated. The Akaike Information Criterion (AIC) was used to compare the models, with smaller values indicating a better fit. By systematically evaluating the impact of excluding observations on model performance, sensitivity analyses can determine whether exclusion significantly enhances model estimates or primarily distorts interpretations. However, the removal of influential observations should be approached with caution, as it may lead to the loss of valuable information and introduce bias.
+
+```{r}
+#| label: cooks-distance-threshold
+#| message: false
+#| warning: false
+# get Cook's distance threshold
+cooks_threshold <- 4 / nrow(adjusted_data)
+
+# Cook's distance for each model
+cooks_d <- lmrob_fits %>%
+  purrr::map2(seq_along(.), ~ {
+    cooks_distance_df(.x, adjusted_data) %>%
+      dplyr::filter(CooksD > cooks_threshold)
+  })
+
+# join Cook's distance data frames
+cooks_d_df <- cooks_d %>%
+  purrr::map2(seq_along(.), ~ {
+    setNames(.x, c("pid", .y))
+  }) %>%
+  Reduce(f = function(x, y) dplyr::full_join(x, y, by = "pid")) %>%
+  dplyr::arrange(pid) %>%
+  dplyr::mutate(n_models = rowSums(!is.na(.))) %>%
+  dplyr::mutate(dplyr::across(dplyr::where(is.numeric), ~ round(., 4))) %>%
+  dplyr::select(pid, n_models, dplyr::everything())
+
+i <- cooks_d_df %$% tail(seq_along(.), -2)
+cooks_d_df[i] <- sapply((cooks_d_df[i] - cooks_threshold) * 100, round, 4)
+cooks_d_df[i][is.na(cooks_d_df[i])] <- ""
+```
+
+```{r}
+#| label: inf-table-attributes
+#| message: false
+#| warning: false
+column_names <- c("pid", "n", as.character(seq_along(lmrob_fits)))
+caption_text <- paste0(
+  "Summary of influential observations detected by ",
+  "Cook's distance for robust regression models ",
+  "(n = ",
+  nrow(cooks_d_df),
+  ")"
+)
+```
+
+```{r}
+#| label: datatable-cooks-distance
+#| message: false
+#| warning: false
+DT::datatable(
+  cooks_d_df,
+  colnames = column_names,
+  caption = caption_text,
+  options = list(
+    searching = FALSE,
+    autoWidth = TRUE,
+    rownames = FALSE,
+    columnDefs = list(
+      list(targets = "_all", sortable = FALSE)
+    )
+  )
+)
+```
+
+```{r}
+#| label: cooks-distance-table-attributes
+#| message: false
+#| warning: false
+column_names <- c("Model", "$\\bar{D}_{\\text{Cook}}$", "$\\sigma_{D_{\\text{Cook}}}$", "$N_{\\text{infl}}$")
+footnote_text <- function(x, y, z) {
+  sprintf(
+    "A total of %d unique influential observations ($N_{\\text{infl}}$) were observed across all models. $\\bar{D}_{\\text{Cook}}$ represents the mean Cook's distance, and $\\sigma_{D_{\\text{Cook}}}$ represents the standard deviation of Cook's distance. Observations with Cook's distance greater than %.3f were considered influential.",
+    length(x), round(y, 3), round(z, 3)
+  )
+}
+```
+
+```{r}
+#| label: cooks-distance-table
+#| tbl-cap: "Summary of influential observations detected by Cook's distance"
+#| message: false
+#| warning: false
+indices_above_threshold <- lapply(cooks_d, `[[`, "Index")
+unique_indices <- unique(unlist(indices_above_threshold))
+sorted_unique_indices <- sort(unique(unlist(indices_above_threshold)))
+n_influential <- length(sorted_unique_indices)
+dispersion <- sd(table(unlist(indices_above_threshold)))
+
+cooks_values_above_threshold <- lapply(cooks_d, `[[`, "CooksD")
+mean_above_threshold <- sapply(cooks_values_above_threshold, mean, na.rm = TRUE)
+sd_above_threshold <- sapply(cooks_values_above_threshold, sd, na.rm = TRUE)
+
+data.frame(
+  model = seq_along(lmrob_fits),
+  mean = unlist(mean_above_threshold),
+  sd = unlist(sd_above_threshold),
+  n = sapply(cooks_d, nrow),
+  row.names = NULL
+) %>%
+  knitr::kable(
+    format = "html", digits = 4, row.names = FALSE,
+    caption = caption_text,
+    col.names = column_names
+  ) %>%
+  kableExtra::footnote(
+    footnote_text(unique_indices, cooks_threshold, dispersion),
+    footnote_as_chunk = TRUE, escape = FALSE
+  )
+```
+
+
+```{r}
+#| label: leverage-plots
+#| fig-height: 15
+#| fig-width: 15
+#| fig-cap: "Leverage plots for influential observations"
+#| message: false
+#| warning: false
+lmrob_fits %>%
+  purrr::map2(beautify_names(names(.)), ~ leverage_plot(.x, .y)) %>%
+  gridExtra::grid.arrange(grobs = ., ncol = 2)
+```
+
+<!-- The Cook's distance and leverage plots flag a few potentially influential observations in some of the models. Researchers should carefully examine these points and consider sensitivity analyses to assess their impact on the results. -->
+
+Table 5 provides a summary of influential observations detected by Cook's distance. The mean Cook's distance and standard deviation of influential observations are reported for each model. The number of influential observations varied across models, with a total of `r n_influential` unique and influential observations observed across all models. The Cook's distance measures the influence of each observation on the model, with observations exceeding `r cooks_threshold` considered influential.
+
+
+```{r}
+#| label: influencial-observations-descriptive-statistics
+# adjusted_data$influential <- FALSE
+# adjusted_data$influential[sorted_unique_indices] <- TRUE
+# caption_text <- paste0(
+#   "Descriptive Statistics of Influential Observations (n = ",
+#   length(which(adjusted_data$influential)),
+#   ")"
+# )
+# dplyr::filter(adjusted_data, influential) %>%
+#   dplyr::select(-influential) %>%
+#   setNames(beautify_names(names(.))) %>%
+#   describe(caption = caption_text)
+```
+
+```{r}
+#| label: influential-observations
+#| message: false
+#| warning: false
+# adjusted_data <- adjusted_data %>% dplyr::filter(!influential)
+# save_rds(adjusted_data, dir = "data")
+```

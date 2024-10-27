@@ -1,0 +1,200 @@
+---
+title: "Data Cleaning"
+subtitle: "Outlier Detection and Removal"
+author: "Siard van den Bosch"
+date: last-modified
+---
+
+```{r}
+#| label: setup
+#| echo: FALSE
+#| include: FALSE
+
+rm(list = ls()) # remove all objects from env
+invisible(gc(full = TRUE)) # free up memory
+
+options(digits = 3, scipen = 100, knitr.kable.NA = "—") # set global options
+knitr::opts_knit$set( # configure knitr options
+  progress = FALSE,
+  verbose = FALSE,
+  cache = FALSE,
+  knitr.table.format = "html",
+  escape = FALSE,
+  digits = 3,
+  row.names = FALSE
+)
+```
+
+```{r}
+#| label: load-functions
+#| echo: FALSE
+#| include: FALSE
+function_list <- c(
+  "pipes", "remove_columns_by_name", "load_most_recent_rds", "univariate_outliers",
+  "dhd_outliers", "beautify_names", "print_kable", "multivariate_outliers",
+  "numeric_data_frame", "format_numeric", "footnote", "remove_constant_and_all_missing"
+)
+purrr::walk(function_list, ~ source(paste0("functions/", .x, ".R"), local = FALSE)) # load custom functions
+main <- haven::read_sav("data/data_for_imputation.sav", user_na = FALSE) %>%
+  dplyr::select(-prop_miss) # load dataset, remove 'prop_miss' column
+```
+
+## Univariate outliers
+
+The boxplots presented provide methods for detecting univariate outliers in the distributions of daily caloric intake and the Dutch Healthy Diet index (DHD-index). This technique defines the Interquartile Range (IQR) as $Q_3 - Q_1$, where $Q_3$ is the 75th percentile, and $Q_1$ is the 25th percentile [@Beyer1981]. Values below $Q_1 - 1.5 \times \text{IQR}$ or above $Q_3 + 1.5 \times \text{IQR}$ were considered outliers. The boxplot for caloric intake demonstrated the precision of the IQR method in identifying outliers, as indicated by the numerous outlier points ($n = 46$) with very high values. This clearly showed that individuals with extremely high caloric intake exceeded the boundaries set by the middle data range. In contrast, the MAD approach, which defines outliers as points outside the median $\pm 2.5 \times \text{MAD}$ and calculates the MAD as the median of the absolute deviations from the median, fits more clustered DHD-index scores [@Leys2013]. The DHD-index boxplot shows the robustness of the MAD approach in detecting outliers. A few outliers ($n = 11$) suggested that diet adherence scores clustered more tightly around the mean. In summary, each variable plot visualizes outlier identification using appropriate statistical techniques for that distribution, highlighting how the IQR method suits the wider spread and outliers of the caloric intake data. By contrast, the MAD approach demonstrated reliability for more clustered data.
+
+
+```{r}
+#| label: univariate-outliers
+#| echo: FALSE
+main$outlier <- NA_character_ # initialize outlier column
+
+dhd_kcal_outliers <- univariate_outliers(data = main, variable = "DHD_KCAL") # detect DHD_KCAL outliers
+
+main$outlier[dhd_kcal_outliers$outliers_indices] <- "Univariate (DHD kcal)" # mark DHD_KCAL outliers
+
+dhd_index_outliers <- dhd_outliers(main, "DHD_index", method = "mad", threshold = 2.5, title = "") # detect DHD-index outliers
+
+main$outlier[dhd_index_outliers$outliers_indices] <- "Univariate (DHD-index)" # mark DHD-index outliers
+
+outlier_list <- list(dhd_kcal_outliers, dhd_index_outliers) # store outlier results
+
+outliers_indices_list <- outlier_list %>%
+  purrr::map(~ purrr::pluck(.x, "outliers_indices")) # extract indices of outliers
+
+outlier_lengths <- sapply(outliers_indices_list, length) # calculate number of outliers per variable
+
+outlier_df <- data.frame( # create df of outlier counts
+  values = outlier_lengths,
+  ind = c("DHD kcal (outliers)", "DHD-index (outliers)")
+) %>% rbind( # add total row
+  data.frame(values = sum(outlier_lengths), ind = "Total")
+)
+
+rows_to_remove_uni <- unlist(lapply(outlier_list, `[[`, 2)) # collect indices of all univariate outliers
+
+invisible({
+  split_result <- split(main, rownames(main) %in% rows_to_remove_uni) # split data by outlier presence
+  list2env(setNames(split_result, c("uni_kept", "uni_dropped")), .GlobalEnv) # create separate dfs
+})
+```
+
+::: {.table-max-450}
+```{r}
+#| label: tbl-uni-outliers
+#| tbl-cap: Number of univariate outliers per variable
+#| message: FALSE
+footnote_text <- "Outliers identified using the IQR method for DHD kcal and the MAD method for the DHD-index"
+knitr::kable( # create table with outlier counts
+  outlier_df,
+  align = "l",
+  col.names = c("N", "Variable")
+) %>%
+  footnote(footnote_text) %>%
+  print_kable() # print table with footnote
+```
+:::
+
+```{r}
+#| label: univariate-outliers-plots
+#| fig-cap: Univariate outliers identified using boxplots
+outlier_list %>%
+  purrr::map(~ purrr::pluck(.x, "plot")) %>%
+  gridExtra::grid.arrange(grobs = ., ncol = 2) # display boxplots for univariate outliers
+```
+
+## Multivariate outliers
+
+```{r}
+#| label: multivariate-outliers
+cols_to_exclude <- c(
+  "idnummer", "outlier",
+  names(uni_kept)[sapply(uni_kept, function(x) length(unique(x)) <= 2)] # exclude columns with constant values
+)
+
+outliers_removed <- uni_kept %>%
+  numeric_data_frame() %>%
+  multivariate_outliers(exclude = cols_to_exclude) # detect multivariate outliers
+
+lof_msg <- outliers_removed$msg # store message from LOF algorithm
+indices_removed <- outliers_removed$id # store multivariate outlier indices
+outliers_removed <- outliers_removed$df # get df without multivariate outliers
+dropped_multi <- uni_kept[indices_removed, ] # create df of multivariate outliers
+
+if (length(indices_removed) != nrow(dropped_multi)) { # check for unexpected row mismatch
+  stop("Unexpected number of rows after multivariate outlier removal")
+}
+
+dropped_multi$outlier <- "Multivariate" # label multivariate outliers
+dropped_multi <- dplyr::select(dropped_multi, outlier, dplyr::everything()) # reorder columns
+```
+
+```{r}
+#| label: tbl-multi-outliers
+#| tbl-cap: Cases with univariate and multivariate outliers excluded from further analysis
+#| column: page
+footnote_text <- paste(
+  "Removed cases due to univariate (identified using boxplots)",
+  "and multivariate outliers (identified using the LOF method)"
+)
+cases_with_outliers <- list(uni_dropped, dropped_multi) %>%
+  Reduce(f = dplyr::bind_rows) # combine univariate and multivariate outlier cases
+
+if (nrow(main) - nrow(outliers_removed) != nrow(cases_with_outliers)) { # check if row counts match
+  warning("Total cases removed does not match the sum of univariate and multivariate outliers")
+}
+
+cases_with_outliers %>%
+  forcats::as_factor() %>%
+  format_numeric(digits = 2) %>%
+  knitr::kable( # create table with excluded cases
+    align = "l",
+    col.names = beautify_names(names(.))
+  ) %>%
+  footnote(footnote_text) %>%
+  print_kable() # print table with footnote
+```
+
+```{r}
+#| label: data-without-outliers
+#| echo: FALSE
+
+data_without_outliers <- main %>%
+  dplyr::select(-outlier) %>%
+  dplyr::filter(!rownames(.) %in% c(rows_to_remove_uni, indices_removed)) # remove outlier rows
+
+haven::write_sav(data_without_outliers, "data/data_without_outliers.sav") # save cleaned data to .sav
+writexl::write_xlsx(data_without_outliers, "data/data_without_outliers.xlsx") # save cleaned data to .xlsx
+```
+
+
+
+turn into a academic paragraph:
+Poor Diet as a Major Preventable Public Health Threat Worldwide:
+- Contribution to Health Issues Since the 1970s: rise in obesity, type 2 diabetes, and cardiovascular diseases.
+- And more...
+
+
+## Key Insights
+Ensure everytrhung from the below outlier detection summary is mentioned in the text:
+1.  Univariate outliers detected in DHD kcal: 45 outliers. 
+2.  Univariate outliers detected in DHD-index: 10 outliers. 
+3.  35 multivariate outliers detected using the LOF method with a threshold of 0.001 (justify this)
+4.  In percentage terms, the univariate outliers represent 4.5% of the total sample, while the multivariate outliers represent 3.5% of the total sample.
+5.  The total number of cases removed due to univariate and multivariate outliers is 90, which represents 8% of the total sample.
+
+## Boxplots
+Also integrate the two c (univariate outliers were identified using boxplots). Here is a descripion of the boxplots:
+
+The boxplots displayed represent the univariate analysis of two key variables in the dataset: daily caloric intake (DHD kcal) on the left and the Dutch Healthy Diet index (DHD-index) on the right. Each boxplot visualizes the distribution of these variables and highlights the presence of outliers.
+
+On the left, the distribution of daily caloric intake is shown. The box represents the interquartile range (IQR), which captures the middle 50% of the data, while the horizontal line within the box marks the median caloric intake. The whiskers extend to 1.5 times the IQR from the 25th and 75th percentiles, which are considered the acceptable range of variation. Any data points outside this range are flagged as outliers and are marked with red dots. The plot shows a large number of high outliers, with caloric intake values exceeding 4,000 kilocalories per day, and a few extreme values reaching as high as 8,000 kilocalories. These high outliers suggest that a portion of the population consumes an unusually large number of calories, possibly due to measurement errors or unique dietary habits.
+
+On the right, the DHD-index distribution is depicted. Similar to the caloric intake boxplot, the box captures the IQR, and the line inside the box represents the median DHD-index score. The DHD-index is a measure of adherence to dietary guidelines, where higher scores indicate better adherence. The whiskers extend to 1.5 times the IQR, and values outside this range are flagged as outliers. Here, fewer outliers are observed compared to caloric intake, and they appear primarily at the lower end of the distribution, suggesting that only a small number of individuals deviate significantly from the typical dietary adherence pattern. These outliers likely represent individuals with particularly poor diet adherence.
+
+In summary, these plots provide insight into the distribution of two important health-related variables: caloric intake and dietary adherence. The caloric intake variable exhibits a large number of extreme outliers, with some individuals consuming far more calories than the typical population, while the DHD-index shows a more tightly clustered distribution, with relatively few individuals displaying extreme deviations in their adherence to dietary guidelines. These boxplots support the necessity of identifying and excluding outliers to prevent them from distorting the overall analysis.
+
+## Integration of the code's logic
+Also, enhance the text based on the functions utilized in the code (see below). Refrain from using function names. Instead, provide a general description of the analysis (e.g., "we examined the distribution of the age of the respondents" or "we assessed the relationship between the age of the respondents and their income"). Only discuss code if it’s crucial to understanding the analysis steps. Ensure you describe the code rather than presenting it verbatim. Remember, the text must adhere to the academic standards and be suitable for a peer-reviewed, publishable research paper.
+
+### All R functions used in the outlier detection process
