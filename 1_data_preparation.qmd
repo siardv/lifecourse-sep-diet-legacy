@@ -1,0 +1,259 @@
+---
+title: "Initial Data Preparation"
+subtitle: "Joining Corrected ISCO-08 Codes to the Main Dataset"
+author: "Siard van den Bosch"
+date: last-modified
+---
+
+```{r}
+#| label: setup
+#| echo: FALSE
+#| include: FALSE
+
+rm(list = ls()) # remove all objects from environment
+invisible(gc(full = TRUE)) # free memory
+options(digits = 3, scipen = 100, knitr.kable.NA = "—") # set global options for output format
+knitr::opts_knit$set( # configure knitting options
+  progress = FALSE, verbose = FALSE, cache = FALSE,
+  knitr.table.format = "html", escape = FALSE,
+  digits = 3, row.names = FALSE
+)
+```
+
+
+```{r}
+#| label: load-functions
+#| echo: FALSE
+#| include: FALSE
+function_list <- c(
+  "pipes", "check_equal_rows", "brc14", "isco08_to_isei08",
+  "plot_normalized_histograms", "remove_rows_with_all_na",
+  "rename_and_select", "standardize_text_input", "numeric_data_frame",
+  "convert_empty_to_na", "join_by_id", "dt_options", "footnote", "add_style", "as_kable"
+)
+purrr::walk(function_list, ~ source(paste0("functions/", .x, ".R"), local = FALSE)) # load multiple functions
+
+main <- haven::read_sav("data/main.sav", user_na = FALSE) %>%
+  dplyr::rename( # read main dataset and rename columns
+    isco08_old = BRC14,
+    isco08_old_father = BRC14_father,
+    isco08_old_mother = BRC14_mother,
+    isco08_old_partner = BRC14_partner
+  )
+
+xlsx <- readxl::read_xlsx("data/corected_isco08_codes.xlsx") # load corrected ISCO-08 codes
+```
+
+```{r}
+#| label: manual-corrections
+#| echo: FALSE
+#| include: FALSE
+# manually correct certain rows in the main dataset
+if (main[main$idnummer == 2023, "occupation_mother"] == "NA") {
+  main[main$idnummer == 2023, "occupation_mother"] <- NA
+}
+if (main[main$idnummer == 1854, "occupation_partner"] == "") {
+  main[main$idnummer == 1854, "occupation_partner"] <- NA
+}
+
+suffixes <- c( # define suffixes for respondent and family members
+  "respondent" = "", "partner" = "_partner",
+  "mother" = "_mother", "father" = "_father"
+)
+occupation_columns <- paste0("occupation", unname(suffixes)) # create occupation column names
+
+main_with_copies <- main %>%
+  dplyr::mutate(dplyr::across( # create copies of occupation columns and standardize text input
+    tidyselect::all_of(occupation_columns),
+    list(init = ~., cleaned = ~ standardize_text_input(.)),
+    .names = "{col}_{fn}"
+  ))
+
+corrected <- xlsx %>%
+  dplyr::select(idnummer, source, occupation, isco08, isco08_init, isco08_new) # select relevant columns from corrected dataset
+
+groups <- dplyr::group_split(corrected, source) # split corrected dataset by source
+suffixes <- suffixes[sapply(groups, `[[`, "source")[1, ]]
+
+groups <- unname(suffixes) %>%
+  setNames(object = purrr::map2(groups, ., rename_and_select)) %>%
+  lapply(remove_rows_with_all_na) %>%
+  Reduce(f = join_by_id) # process groups and join by idnummer
+
+.objects <- list(main, main_with_copies, groups) %T>% check_equal_rows() # check if row counts are equal across datasets
+
+groups_coalesced <- groups %>%
+  dplyr::mutate( # coalesce old and new ISCO-08 codes
+    isco08r = dplyr::coalesce(isco08_new, isco08_old),
+    isco08r_father = dplyr::coalesce(isco08_new_father, isco08_old_father),
+    isco08r_mother = dplyr::coalesce(isco08_new_mother, isco08_old_mother),
+    isco08r_partner = dplyr::coalesce(isco08_new_partner, isco08_old_partner)
+  )
+
+groups_with_brc14 <- groups_coalesced %>%
+  dplyr::mutate( # convert ISCO-08 codes to BRC-14 codes
+    dplyr::across(
+      dplyr::matches("isco08r"),
+      ~ isco08_to_brc14(.),
+      .names = "{gsub('isco08r', 'brc14', .col)}"
+    )
+  )
+groups_with_isei08 <- groups_with_brc14 %>%
+  dplyr::mutate( # convert ISCO-08 codes to ISEI-08 codes
+    dplyr::across(
+      dplyr::matches("isco08r"),
+      ~ isco08_to_isei08(.),
+      .names = "{gsub('isco08r', 'isei08', .col)}"
+    )
+  )
+
+grep_sort <- function(x) sort(grep("_cleaned$", names(x), value = TRUE)) # helper function to find cleaned columns
+cleaned_cols <- lapply(list(groups_with_isei08, main_with_copies), grep_sort) # get cleaned columns
+stopifnot(Reduce(all.equal, cleaned_cols)) # ensure both datasets have the same cleaned columns
+
+remove_empty_strings <- function(x) { # convert empty strings to NA
+  dplyr::mutate(x, dplyr::across(dplyr::where(is.character), convert_empty_to_na))
+}
+
+groups_sub <- groups_with_isei08 %>%
+  dplyr::select( # select relevant columns for joining
+    idnummer, cleaned_cols[[1]],
+    dplyr::matches("isco08r"), dplyr::matches("brc14", ignore.case = FALSE), dplyr::matches("isei08")
+  ) %>%
+  remove_empty_strings()
+
+main_joined <- main_with_copies %>%
+  remove_empty_strings() %>%
+  dplyr::select(-source, -imputed) %>%
+  dplyr::full_join(groups_sub,
+    by = c("idnummer", paste0(occupation_columns, "_cleaned"))
+  ) # join datasets by idnummer and cleaned occupation columns
+check_equal_rows(c(.objects, list(groups_sub, main_joined))) # validate row counts
+
+haven::write_sav(main_joined, "data/main_joined.sav") # save the joined dataset
+```
+
+```{r}
+#| label: comparing-initial-and-corrected-isco-08-codes-resp
+#| fig.cap: "Comparison of the initial and corrected ISCO-08 codes for the respondent."
+footnote_text <- "Note: A value of 0 indicates the lowest value in the dataset, while a value of 1 indicates the highest value."
+labels_text <- c("ISCO-08 (original)", "ISCO-08 (corrected)")
+plot_normalized_histograms(
+  x = isco08r, y = isco08_old,
+  df = main_joined, labels = labels_text, footnote = footnote_text
+)
+```
+
+```{r}
+#| label: comparing-initial-and-corrected-isco-08-codes-partner
+#| fig.cap: "Comparison of the initial and corrected ISCO-08 codes for the partner."
+plot_normalized_histograms(
+  x = isco08r_partner, y = isco08_old_partner,
+  df = main_joined, labels = labels_text, footnote = footnote_text
+)
+```
+
+```{r}
+#| label: comparing-initial-and-corrected-isco-08-codes-father
+#| fig.cap: "Comparison of the initial and corrected ISCO-08 codes for the father."
+plot_normalized_histograms(
+  x = isco08r_father, y = isco08_old_father,
+  df = main_joined, labels = labels_text, footnote = footnote_text
+)
+```
+
+```{r}
+#| label: comparing-initial-and-corrected-isco-08-codes-mother
+#| fig.cap: "Comparison of the initial and corrected ISCO-08 codes for the mother."
+plot_normalized_histograms(
+  x = isco08r_mother, y = isco08_old_mother,
+  df = main_joined, labels = labels_text, footnote = footnote_text
+)
+```
+
+:::{.column-page}
+```{r}
+#| label: overview-table-of-isco-08-corrections
+#| tab.cap: "Corrected ISCO-08 Codes with Justifications"
+col_names <- tth::tth(sprintf(
+  "$\\text{%s}$", # format column names for output
+  c(
+    "id",
+    "Relation to Respondent",
+    "Occupation",
+    "ISCO-08 {\\text{(final)}}",
+    "ISCO-08 {\\text{(original)}}",
+    "ISCO-08 {\\text{group (original)}}",
+    "ISCO-08 {\\text{(revised)}}",
+    "ISCO-08 {\\text{group (revised)}}",
+    "Justification"
+  )
+)) %>% stringr::str_replace_all(c("-" = "&#8209;", " " = "&nbsp;"))
+
+footnote_text <- "This table displays the corrected ISCO-08 codes, initial codes, and justifications for the changes. ISCO-08 codes are grouped into broader categories for initial and new classifications."
+
+# xlsx %>%
+#   dplyr::filter(!is.na(isco08_new)) %>%
+#   as_kable() %>% footnote() %>% add_style()
+```
+:::
+
+:::{.column-page}
+```{r}
+#| label: overview-table-of-occupation-variables
+#| tab.cap: "Overview of Occupation Variables"
+clean_cols <- tth::tth(sprintf(
+  "$\\text{%s}$", # format column names for occupation overview
+  c(
+    "id",
+    "Occupation",
+    "ISCO-08 {\\text{(original)}}",
+    "ISCO-08 {\\text{(revised)}}",
+    "BRC-14",
+    "ISEI-08",
+    "Occupation Partner",
+    "ISCO-08 {\\text{partner (original)}}",
+    "ISCO-08 {\\text{partner (revised)}}",
+    "BRC-14 {\\text{partner}}",
+    "ISEI-08 {\\text{partner}}",
+    "Occupation Mother",
+    "ISCO-08 {\\text{mother (original)}}",
+    "ISCO-08 {\\text{mother (revised)}}",
+    "BRC-14 {\\text{mother}}",
+    "ISEI-08 {\\text{mother}}",
+    "Occupation Father",
+    "ISCO-08 {\\text{father (original)}}",
+    "ISCO-08 {\\text{father (revised)}}",
+    "BRC-14 {\\text{father}}",
+    "ISEI-08 {\\text{father}}"
+  )
+)) %>% stringr::str_replace_all(c("-" = "&#8209;", " " = "&nbsp;"))
+
+footnote_text <- "This table provides an overview of the occupation variables in the dataset, including initial and corrected ISCO-08 codes, BRC14 codes, and ISEI08 scores for respondents, partners, mothers, and fathers."
+
+occ_vars <- "init|isco08_old|isco08r|brc14|isei08" %>%
+  grep(names(main_joined), value = TRUE) %>%
+  split(grepl("occupation", .)) %>%
+  rev() %>%
+  unlist(use.names = FALSE)
+occ_vars <- rev(unname(suffixes)) %>%
+  sapply(grep, x = occ_vars, value = TRUE) %>%
+  unlist() %>%
+  unique(fromLast = TRUE)
+
+# create interactive table of occupation variables
+main_joined %>%
+  dplyr::select(idnummer, dplyr::all_of(occ_vars)) %>%
+  DT::datatable(
+    colnames = clean_cols,
+    escape = FALSE,
+    filter = "none",
+    rownames = FALSE,
+    options = dt_options(
+      footnote = footnote_text,
+      searching = FALSE,
+      autoWidth = TRUE
+    )
+  )
+```
+:::

@@ -1,0 +1,627 @@
+---
+title: "Data Cleaning"
+subtitle: "Preparing Data for Imputation"
+author: "Siard van den Bosch"
+date: last-modified
+---
+
+```{r}
+#| label: setup
+#| echo: FALSE
+#| include: FALSE
+
+rm(list = ls())
+invisible(gc(full = TRUE))
+options(digits = 3, scipen = 100, knitr.kable.NA = "—")
+knitr::opts_knit$set(
+  progress = FALSE, verbose = FALSE, cache = FALSE,
+  knitr.table.format = "html", escape = FALSE,
+  digits = 3, row.names = FALSE
+)
+source("functions/minify.R", echo = FALSE, local = TRUE)
+minify("../script.js", "_site")
+minify("../highlight.css", "_site")
+```
+
+```{r}
+#| label: load-functions
+#| echo: FALSE
+#| include: FALSE
+function_list <- c(
+  "pipes", "save_step", "decapitalize", "footnote", "remove_columns_by_name",
+  "frequency_table", "labels_to_string", "beautify_names", "numeric_data_frame",
+  "column_type_conversion", "summarize_missing_values", "save_rds", "print_kable",
+  "update_value_label", "get_all_na_rows_indices", "describe", "format_p_value",
+  "rownames_to_column", "logical_order", "brc14", "isco08_to_jobtitle",
+  "update_isco08r", "update_brc14"
+)
+
+purrr::walk(function_list, ~ source(paste0("functions/", .x, ".R"), local = FALSE))
+main <- haven::read_sav("data/main_joined.sav", user_na = FALSE) %>%
+  setNames(decapitalize(names(.))) %>%
+  dplyr::mutate(dplyr::across(dplyr::starts_with("brc14"), as.integer)) %>%
+  dplyr::select(-dplyr::matches("(_cleaned|_init)$|_old")) %T>%
+  haven::write_sav("data/main_joined_cleaned.sav")
+
+main$occupation[is.na(main$isco08r)] <- NA
+main$occupation_partner[is.na(main$isco08r_partner)] <- NA
+main$occupation_father[is.na(main$isco08r_father)] <- NA
+main$occupation_mother[is.na(main$isco08r_mother)] <- NA
+```
+
+To ensure accurate and meaningful imputation, the dataset undergoes a process of recoding and transforming variables.
+
+## Recoding Variables
+
+### Number of Children in the Household
+
+```{r}
+#| label: tbl-children-hh
+#| tbl-cap: "Number of children in the household"
+footnote_text <- labels_to_string(main, "children_hh")
+
+data_cleaned <- main %>%
+  dplyr::mutate(num_children_hh = haven::labelled(
+    c(children_hh - 1),
+    c(
+      "0 children" = 0,
+      "1 child" = 1,
+      "2 children" = 2,
+      "3 children" = 3,
+      "4 children" = 4,
+      "5 children" = 5,
+      "6 children" = 6,
+      "7 children" = 7,
+      "8 children" = 8,
+      "9 or more children" = 10
+    )
+  )) %>%
+  dplyr::select(-children_hh) %>%
+  save_step(reset = TRUE)
+
+data_cleaned %>%
+  frequency_table(variable = num_children_hh) %>%
+  footnote(footnote_text, general_title = "") %>%
+  print_kable()
+```
+
+### Smoking Status
+
+```{r}
+#| label: tbl-smoking-status
+#| tbl-cap: "Responses to the Question \"Do you smoke?\""
+footnote_text <- labels_to_string(data_cleaned, "q63")
+
+data_cleaned %<>% save_step() %>%
+  dplyr::mutate(smoking_status = labelled::labelled(
+    as.numeric(q63) - 1,
+    c("No, never did" = 0, "No, but used to" = 1, "Yes" = 2)
+  )) %>%
+  dplyr::select(-q63)
+
+data_cleaned %>%
+  frequency_table(variable = smoking_status) %>%
+  footnote(footnote_text, general_title = "") %>%
+  print_kable()
+```
+
+### Children in Household (Yes/No)
+
+```{r}
+#| label: tbl-children-hh-yes
+#| tbl-cap: "Responses to the Question \"Are there children in the household?\""
+footnote_text <- labels_to_string(data_cleaned, "children_hh_yes")
+
+data_cleaned %<>%
+  dplyr::mutate(children_in_hh = labelled::labelled(
+    children_hh_yes,
+    c(
+      "No child(ren) in household" = 0,
+      "Child(ren) in household" = 1
+    )
+  )) %>%
+  dplyr::select(-children_hh_yes) %>%
+  save_step()
+
+data_cleaned %>%
+  frequency_table(variable = children_in_hh) %>%
+  footnote(footnote_text, general_title = "") %>%
+  print_kable()
+```
+
+### Normal Week
+
+```{r}
+#| label: tbl-normal-week
+#| tbl-cap: "Responses to the Question \"Was it a normal week? [Was het een normale week?]\""
+footnote_text <- labels_to_string(data_cleaned, "q79")
+
+data_cleaned %<>%
+  dplyr::mutate(normal_week = labelled::labelled(
+    as.integer(q79 != 2), c("No" = 0, "Yes" = 1)
+  )) %>%
+  dplyr::select(-q79) %>%
+  save_step()
+
+if (any(!data_cleaned$normal_week %in% c(0, 1, NA), na.rm = TRUE)) {
+  warning("Unexpected values found in normal_week after recoding")
+}
+
+data_cleaned %>%
+  frequency_table(variable = normal_week) %>%
+  footnote(footnote_text, general_title = "") %>%
+  print_kable()
+```
+
+### Home Ownership
+
+```{r}
+#| label: tbl-home-ownership
+#| tbl-cap: "Responses to the Question \"Do you own the house you live in?\""
+footnote_text <- labels_to_string(data_cleaned, "q35")
+
+data_cleaned %<>%
+  dplyr::mutate(home_owner = labelled::labelled(
+    as.integer(q35 == 1), c("No" = 0, "Yes" = 1)
+  )) %>%
+  dplyr::select(-q35) %>%
+  save_step()
+
+data_cleaned %>%
+  frequency_table(variable = home_owner) %>%
+  footnote(footnote_text, general_title = "") %>%
+  print_kable()
+```
+
+### Gender
+
+```{r}
+#| label: tbl-gender
+#| tbl-cap: "Gender distribution (respondent is woman)"
+footnote_text <- labels_to_string(data_cleaned, "gender")
+
+data_cleaned %<>%
+  dplyr::mutate(woman = labelled::labelled(
+    as.integer(gender == 1), c("Man" = 0, "Woman" = 1)
+  )) %>%
+  dplyr::select(-gender) %>%
+  save_step()
+
+data_cleaned %>%
+  frequency_table(variable = woman) %>%
+  footnote(footnote_text, general_title = "") %>%
+  print_kable()
+```
+
+### Difficulty Living from Income
+
+```{r}
+#| label: tbl-difficulty-living-income
+#| tbl-cap: "Responses to the Question \"How difficult is it to live from your income?\""
+footnote_text <- labels_to_string(data_cleaned, "diff_live_income")
+
+data_cleaned %<>%
+  dplyr::mutate(diff_live_income = labelled::labelled(
+    4 - as.integer(diff_live_income),
+    c(
+      "Very easy (no difficulty)" = 0, "Relatively easy" = 1,
+      "Some difficulty" = 2, "Great difficulty" = 3
+    )
+  )) %>% save_step()
+
+if (any(!data_cleaned$diff_live_income %in% 0:3, na.rm = TRUE)) {
+  warning("Unexpected values after recoding")
+}
+
+data_cleaned %>%
+  frequency_table(variable = diff_live_income) %>%
+  footnote(footnote_text, general_title = "") %>%
+  print_kable()
+```
+
+### Difficulty Paying from Regular Bills
+
+```{r}
+#| label: tbl-difficulty-paying-bills
+#| tbl-cap: "Responses to the Question \"How difficult is it to pay your regular bills?\""
+footnote_text <- labels_to_string(data_cleaned, "diff_pay_bills")
+
+data_cleaned %<>%
+  dplyr::mutate(diff_pay_bills = labelled::labelled(
+    as.integer(diff_pay_bills) - 1,
+    c(
+      "No, no difficulty at all" = 0,
+      "Some difficulty" = 1,
+      "Yes, great difficulty" = 2
+    )
+  )) %>% save_step()
+
+if (any(!data_cleaned$diff_pay_bills %in% 0:2, na.rm = TRUE)) {
+  warning("Unexpected values after recoding")
+}
+
+data_cleaned %>%
+  frequency_table(variable = diff_pay_bills) %>%
+  footnote(footnote_text, general_title = "") %>%
+  print_kable()
+```
+
+### Partner Status
+
+```{r}
+#| label: tbl-partner-status
+#| tbl-cap: "Responses to the Question \"Do you have a partner?\""
+footnote_text <- labels_to_string(data_cleaned, "partneryn")
+
+data_cleaned %<>%
+  dplyr::mutate(partner_status = labelled::labelled(
+    as.integer(partneryn == 1),
+    c("No" = 0, "Yes" = 1)
+  )) %>%
+  dplyr::select(-partneryn) %>%
+  save_step()
+
+data_cleaned %>%
+  frequency_table(variable = partner_status) %>%
+  footnote(footnote_text, general_title = "") %>%
+  print_kable()
+```
+
+### Partner's Occupation and Education
+
+The data included occupation, education, and partner details.
+Cases with missing partner data were recoded to separate unpartnered respondents from partnered ones with missing data.
+For the former, missing values were set to zero, while the former kept the missing values.
+
+:::{.column-page}
+```{r}
+#| label: partner-education
+#| tbl-cap: "Partner's education level"
+footnote_text <- labels_to_string(data_cleaned, "education_partner")
+footnote_text %<>% paste0(
+  "<br><i>Note</i>: Missing values for partner's education were recoded to 'No ",
+  "partner' for respondents without a partner."
+)
+
+data_cleaned %<>%
+  dplyr::mutate(dplyr::across(
+    c(ISCO08_partner, education_partner),
+    ~ dplyr::if_else(partner_status == 0 & is.na(.), 0, .)
+  )) %>% labelled::drop_unused_value_labels()
+
+update_value_label(data_cleaned, "education_partner", 0, "no partner")
+data_cleaned %<>% save_step()
+
+data_cleaned %>%
+  frequency_table(variable = education_partner) %>%
+  footnote(footnote_text, general_title = "") %>%
+  print_kable()
+```
+:::
+
+```{r}
+#| label: partner-occupation-isco-08
+#| tbl-cap: "Partner's occupation (ISCO-08)"
+cbs_href <- "https://www.cbs.nl/nl-nl/onze-diensten/methoden/classificaties/onderwijs-en-beroepen/beroepenclassificatie--isco-en-sbc--"
+link <- htmltools::a("CBS", href = cbs_href)
+footnote_text <- paste(
+  "<br><i>Note</i>:",
+  "Occupation codes were reclassified into job titles utilizing the ISCO-08",
+  "classification system. The ISCO-08 classification is a standardized taxonomy",
+  "of occupations developed by the International Labour Organization (ILO).",
+  "The ISCO-08 classification is accessible from the", link, "website."
+)
+footnote_partner <- "Missing values for partner's occupation were recoded as 'No partner' for respondents without a partner."
+data_cleaned$isco08r_partner[data_cleaned$partner_status == 0 & is.na(data_cleaned$isco08r_partner)] <- 0
+update_isco08r("isco08r_partner", data_cleaned)
+update_value_label(data_cleaned, "isco08r_partner", 0, "No partner")
+
+data_cleaned %<>% save_step()
+data_cleaned %>%
+  frequency_table(variable = isco08r_partner) %>%
+  footnote(paste(footnote_text, footnote_partner), general_title = "") %>%
+  print_kable()
+```
+
+:::{.column-page}
+```{r}
+#| label: occupation-isco-08
+#| tbl-cap: "Occupation (ISCO-08)"
+update_isco08r("isco08r", data_cleaned)
+data_cleaned %<>% save_step()
+
+data_cleaned %>%
+  frequency_table(variable = isco08r) %>%
+  footnote(footnote_text, general_title = "") %>%
+  print_kable()
+```
+:::
+
+:::{.column-page}
+```{r}
+#| label: father-occupation-isco-08
+#| tbl-cap: "Father's occupation (ISCO-08)"
+update_isco08r("isco08r_father", data_cleaned)
+data_cleaned %<>% save_step()
+
+data_cleaned %>%
+  frequency_table(variable = isco08r_father) %>%
+  footnote(footnote_text, general_title = "") %>%
+  print_kable()
+```
+:::
+
+:::{.column-page}
+```{r}
+#| label: mother-occupation-isco-08
+#| tbl-cap: "Mother's occupation (ISCO-08)"
+update_isco08r("isco08r_mother", data_cleaned)
+data_cleaned %<>% save_step()
+
+data_cleaned %>%
+  frequency_table(variable = isco08r_mother) %>%
+  footnote(footnote_text, general_title = "") %>%
+  print_kable()
+```
+:::
+
+:::{.column-page}
+```{r}
+#| label: occupation-brc-14
+#| tbl-cap: "Occupation (BRC14)"
+brc14_map_data <- brc14_map()
+update_brc14("brc14", data_cleaned, brc14_map_data)
+
+data_cleaned %<>% save_step()
+data_cleaned %>%
+  frequency_table(variable = brc14_partner) %>%
+  footnote(footnote_text, general_title = "") %>%
+  print_kable()
+```
+:::
+
+:::{.column-page}
+```{r}
+#| label: mother-occupation-brc-14
+#| tbl-cap: "Mother's occupation (BRC14)"
+update_brc14("brc14_mother", data_cleaned, brc14_map_data)
+
+data_cleaned %<>% save_step()
+data_cleaned %>%
+  frequency_table(variable = brc14_mother) %>%
+  footnote(footnote_text, general_title = "") %>%
+  print_kable()
+```
+:::
+
+:::{.column-page}
+```{r}
+#| label: father-occupation-brc-14
+#| tbl-cap: "Father's occupation (BRC14)"
+update_brc14("brc14_father", data_cleaned, brc14_map_data)
+
+data_cleaned %<>% save_step()
+data_cleaned %>%
+  frequency_table(variable = brc14_father) %>%
+  footnote(footnote_text, general_title = "") %>%
+  print_kable()
+```
+:::
+
+```{r}
+#| label: partner-occupation-brc-14
+#| tbl-cap: "Partner's occupation (BRC14)"
+data_cleaned$brc14_partner[data_cleaned$partner_status == 0 & is.na(data_cleaned$brc14_partner)] <- 0
+update_brc14("brc14_partner", data_cleaned, brc14_map_data)
+update_value_label(data_cleaned, "brc14_partner", 0, "No partner")
+
+data_cleaned %<>% save_step()
+data_cleaned %>%
+  frequency_table(variable = brc14_partner) %>%
+  footnote(paste(footnote_text, footnote_partner), general_title = "") %>%
+  print_kable()
+
+data_cleaned$isei08_partner[data_cleaned$partner_status == 0 & is.na(data_cleaned$isei08_partner)] <- 0
+```
+
+## Filtering and Selecting Variables
+
+The data is filtered to include only numeric variables and exclude recoded, character, and derived columns, keeping only the original variables for imputation.
+
+```{r}
+#| label: filter-select-variables-setup
+#| tbl-cap: "Variables excluded from imputation"
+missing_values_summary <- summarize_missing_values(data_cleaned, print_table = FALSE)
+save_rds(missing_values_summary, use_date = FALSE, dir = "data")
+
+get_variable_type <- function(...) class(type.convert(..., as.is = TRUE))
+
+derived_variables <- c(
+  "idnummer", "crowding", "hh_comp", "hh_members",
+  "income_hh_num", "income_hh_eq", "eq_size", "children_in_hh"
+)
+
+column_types <- stack(sapply(data_cleaned, get_variable_type))[2:1]
+names(column_types) <- c("variable", "character")
+
+patterns <- paste(
+  ".*_(cat|rec)$", "^SES_index.*",
+  "^ISCO[2008]+[^r].*",
+  "^BRC14[_a-z]*", "^skill_level",
+  sep = "|"
+)
+
+column_types[c("character", "recoded", "derived")] <- lapply(list(
+  column_types$character == "character",
+  grepl(patterns, column_types$variable),
+  column_types$variable %in% derived_variables
+), as.integer)
+
+column_types$keep <- rowSums(column_types[, -1]) == 0
+d <- dplyr::desc
+variable_info <- column_types %>%
+  dplyr::mutate(dplyr::across(-variable, ~ c("·", "×")[as.numeric(.) + 1])) %>%
+  dplyr::inner_join(missing_values_summary, by = "variable")
+variable_info$derived[grep("isei08|brc14", variable_info$variable)] <- "×"
+
+variable_info %<>%
+  dplyr::mutate(kd = as.integer(paste0(keep, derived) == "××")) %>%
+  dplyr::arrange(d(keep), kd, d(derived), d(recoded)) %>%
+  dplyr::select(-kd)
+
+footnote_text <- paste("N=", nrow(data_cleaned), ";", "n=", nrow(variable_info), ";",
+  "The symbol \"x\" represents cases in which the criteria in the column header are",
+  "met. We did not impute the recoded or character variables. These were either",
+  "derived from other variables (recoding) or simply could not be used in",
+  "imputation procedures because of their categorical nature. Variables calculated",
+  "from recoded or other continuous measures were also excluded because they were",
+  "neither suitable nor necessary for the primary analysis. The missing data",
+  "patterns were primarily related to non-respondent status for continuous",
+  "measures. Recoded variables reorganize existing data; derived variables create",
+  "new data from existing variables."
+)
+
+names(variable_info) <- tth::tth(c(
+  "Variable", "Character", "Recoded", "Derived",
+  "Keep", "$\\textit{N}_{missing}$", "$\\%_{missing}$"
+))
+
+variable_info %>%
+  knitr::kable("html", align = "lcccccc") %>%
+  kableExtra::add_header_above(
+    c(" " = 1, "Reasons for exclusion" = 3, " " = 3)
+  ) %>%
+  footnote(footnote_text) %>%
+  print_kable()
+
+data_subset <- data_cleaned %>%
+  subset(select = c("idnummer", as.character(column_types$variable[column_types$keep])))
+
+# nrow(data_subset)
+# = 1784
+```
+
+#### Little's MCAR test
+
+```{r}
+#| label: mcar-test
+#| tbl-cap: "Little's missing completely at random (MCAR) test"
+mcar_init_test <- naniar::mcar_test(data_subset) %>%
+  dplyr::mutate(p.value = format_p_value(p.value))
+
+names(mcar_init_test) <- tth::tth(c(
+  "$\\chi^2$", "$df$", "$p$",
+  "$\\text{Missing Patterns}^{1}$"
+))
+
+footnote_text <- tth::tth(
+  paste(
+    paste0("n=", nrow(data_subset), "; "),
+    "p $\\leq$ 0.001 indicates data are not missing completely at random.",
+    "The $\\chi^2$ test statistic and degrees of freedom (df) ",
+    "were used to calculate the $p$-value.",
+    "$^{1}$Number of missing data patterns."
+  )
+)
+mcar_init_test %>%
+  knitr::kable(align = "lllr", escape = FALSE) %>%
+  footnote(footnote_text) %>%
+  print_kable()
+```
+
+The Little's MCAR test indicates that the missing data is NOT completely at random (p≤0.001), suggesting the presence of a systematic pattern likely due to aspects inherent to the study's data collection approach.
+The original authors enlisted participants through postal invitations and targeted social media promotions, which may have introduced bias and differences between those who responded and those who did not.
+Online questionnaires may have caused participant exhaustion or disinterest, leading to incomplete responses and study dropouts.
+It is possible that questions pertaining to sensitive topics, such as income, were more susceptible to incomplete responses.
+The study's inclusion and exclusion criteria, including proficiency in Dutch and access to necessary digital tools, may have led to the systematic exclusion of specific demographic groups.
+The multi-step study process, which involved obtaining informed consent and completing multiple questionnaires, may have contributed to the high rate of study dropouts.
+
+```{r}
+#| label: no-missing-dhd-values
+cases_with_missing_dhd_values <- which(c(is.na(data_subset$DHD_index) & is.na(data_subset$DHD_KCAL)))
+sentence_missing_dhd <- paste0(
+  "Out of the total ", nrow(data_subset), " respondents, ",
+  length(cases_with_missing_dhd_values), " had missing values for both the DHD index and DHD kcal (",
+  round(length(cases_with_missing_dhd_values) / nrow(data_subset) * 100, 2), "%), and were excluded from further analysis since DHD-index is the outcome variable and DHD kcal is a predictor (control) variable. Imputing these values would introduce bias."
+)
+htmltools::HTML(paste0("<p>", gsub(",$", ".", sentence_missing_dhd), "</p>"))
+
+data_subset_2 <- data_subset[-cases_with_missing_dhd_values, ]
+```
+
+```{r}
+#| label: no-missing-dhd-values-summary
+#| tbl-cap: "Overview of missing values after removing cases without DHD values (DHD index & DHD kcal)"
+summarize_missing_values(data_subset_2)
+```
+
+:::{.column-page}
+```{r}
+data_subset_2$prop_miss <- data_subset_2 %>%
+  dplyr::select(dplyr::matches("_(par|mot|fat)|^dhd|dif|inc|edu|isei", ignore.case = TRUE)) %>%
+  dplyr::select(-dplyr::matches("brc14|isco08")) %>%
+  asplit(1) %>%
+  sapply(function(x) mean(is.na(x)))
+
+prop_miss_table <- table(data_subset_2$prop_miss)
+counts <- as.numeric(prop_miss_table)
+props <- paste0(round(as.numeric(names(prop_miss_table)[-1]) * 100, 2), "%")
+sentence <- paste0(
+    "Out of the total ", sum(prop_miss_table), " respondents, ", counts[1], " had no missing values, followed by ",
+    counts[2], "respondents (", props[1], "), ", counts[3], " (", props[2], "), ", counts[4], " (", props[3], "), ",
+    counts[5], " (", props[4], "), ", counts[6], " (", props[5], "), and finally ", counts[7], " (", props[6], ") with increasing proportions of missing values."
+)
+
+htmltools::HTML(paste0("<p>", gsub(",$", ".", sentence), "</p>"))
+
+cut_off <- min(unique(data_subset_2$prop_miss[data_subset_2$prop_miss > 0.2]))
+data_for_imputation <- data_subset_2 %>%
+  dplyr::filter(prop_miss < cut_off)
+
+haven::write_sav(data_for_imputation, "data/data_for_imputation.sav")
+```
+:::
+
+## Descriptive statistics before outlier removal
+:::{.column-page}
+```{r}
+#| label: filter-select-variables
+#| tbl-cap: "Descriptive statistics before univariate and multivariate outlier removal"
+tbl <- describe(
+  data_for_imputation,
+  add_footnote = TRUE,
+  latex = TRUE,
+  normality = TRUE,
+  print_only = FALSE,
+  exclude = "idnummer"
+)
+
+col_names <- tth::tth(c(
+    "$\\ $", "$n$", "$\\bar{x}$", "$\\text{Min.}$", "$\\text{Max.}$",
+    "$SD$", "$\\text{Skewnes}$", "$\\text{Kurtosis}$", "$SE$",
+    "$\\text{Normality}^{\\dagger}$", "$p$"
+))
+
+knitr::kable(tbl, col.names = col_names, align = "lllr") %>%
+  print_kable()
+```
+:::
+
+
+<script src="script.min.js"></script>
+<link rel="stylesheet" type="text/css" href="highlight.min.css">
+
+
+The variables were recoded to establish meaningful baselines and enhance interpretability. The variable representing the number of children in the household, initially categorized as "No children," "1 child," and "2 or more children," was recoded into three numeric categories. The number of children in the household variable was recoded from its original 10-category structure to a simplified 3-category format. The new coding assigns 0 for no children (previously 1), 1 for one child (previously 2), and 2 for two or more children (previously 3-10). This recoding resulted in a 59.1%, 14.9%, and 26%. The transformation creates more balanced categories, avoiding the increasingly small groups in the original data for higher numbers of children while maintaining meaningful distinctions in family composition for analysis.
+
+Similarly, smoking status was recoded to capture significant differences in smoking behavior. The original categories, "Never smoked," "Former smoker," and "Current smoker," were transformed into numeric codes, with 0 representing "Never smoked," 1 indicating "Former smoker," and 2 denoting "Current smoker." Assigning these numeric codes facilitated statistical comparisons between different smoking groups and allowed for the assessment of potential health impacts.
+
+Homeownership was also recoded for clarity and efficiency. The original responses, "Yes" and "No," were transformed into 1 for "Yes" and 0 for "No," providing a clear binary distinction that aids in analyzing socioeconomic factors related to housing. Additionally, gender was recoded to simplify the analysis, with the original categories of "Woman" and "Man" represented by 1 and 0, respectively. This transformation allowed for efficient examination of gender differences within the dataset.
+
+The variables measuring financial difficulty were recoded to establish a consistent scale where higher numeric values represent greater levels of financial hardship. For the variable assessing the difficulty of living from one's income, the original coding ranged from 1 to 4 with labels: 1 for "Great difficulty," 2 for "Some difficulty," 3 for "Relatively easy," and 4 for "Very easy." This original coding assigned higher numeric values to less difficulty, which could be counterintuitive when analyzing financial hardship, as higher numbers typically indicate greater levels of a measured trait. To address this issue and enhance the variable's interpretability for analysis, the data were recoded by subtracting each original value from 4. This transformation inverted the scale, resulting in new values where 0 corresponds to "Very easy (no difficulty)," 1 to "Relatively easy," 2 to "Some difficulty," and 3 to "Great difficulty." This recoding ensures that higher values correspond to greater financial difficulty, aligning with the intuitive understanding that higher scores indicate more hardship.
+
+Similarly, the variable measuring the difficulty in paying regular bills was recoded to align with this new scaling approach. The original coding for this variable ranged from 1 to 3, labeled as 1 for “No, no difficulty at all,” 2 for “Some difficulty,” and 3 for “Yes, great difficulty.” To adjust this variable to a scale starting at 0 and to ensure that higher values consistently represent greater difficulty across variables, each original value was subtracted by 1. The new coding thus became 0 for “No, no difficulty at all,” 1 for “Some difficulty,” and 2 for “Yes, great difficulty.” By uniformizing the coding across these variables, the dataset achieves consistency, which is crucial for accurate comparative analyses and interpretations of socioeconomic indicators.
+
+The recoding process aligns the variables so that higher numeric values represent greater levels of financial hardship, facilitating more intuitive interpretation and analysis of the data. This consistent scaling enhances the reliability of statistical analyses and supports more substantive conclusions regarding socioeconomic stress factors within the population studied. Partner status was recoded to distinguish between respondents with a partner and those without. The original responses were transformed into numeric codes, with 1 representing "Yes" (has a partner) and 0 representing "No" (no partner).
+
+Occupational variables for respondents, their partners, and their parents were updated using the International Standard Classification of Occupations (ISCO-08), ensuring consistency with global occupational classifications (International Labour Organization [ILO], 2012). For respondents without partners, missing occupation data were assigned 0 (since the effect of a partner's occupation is zero). This recoding helped to differentiate them from partnered respondents with true missing data. This approach prevented confusion between non-applicable cases and missing information, enhancing the accuracy of subsequent analyses.

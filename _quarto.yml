@@ -1,0 +1,66 @@
+project:
+  type: website
+  title: "DietQuality"
+  render:
+    - "!1_data_preparation.qmd"
+    - "!2_data_cleaning.qmd"
+    - "!3_outliers.qmd"
+    - "!4_imputation.qmd"
+    - "!5_models.Rmd"
+    - "!6_unadjusted_fits.Rmd"
+    - "!7_adjusted_fits.Rmd"
+
+website:
+  navbar:
+    title: "Reproducibility Pipeline"
+    top:
+      - text: "Home"
+        href: index.html
+      - text: "Data"
+        menu:
+          - text: "Data Cleaning"
+            href: index.html
+          - text: "Data Analysis"
+            href: index.html
+      - text: "Results"
+        href: index.html
+    right:
+      - text: "About"
+        href: about.html
+      - icon: fa fa-github
+        href: https://github.com/siardv
+    search: true
+
+format:
+  html:
+    theme: cosmo
+    page-layout: article
+    grid:
+      sidebar-width: 200px
+      margin-width: 200px
+    mainfont: "Cambria"
+    linkcolor: "#007bff"
+    code-line-numbers: false
+    digits: 3
+    code-copy: true
+    code-summary: "Show code"
+    code-fold: true
+    code-overflow: wrap
+    cap-location: top
+    highlight-style: dracula
+    code-tools: true
+    toc: true
+    toc-title: "Overview"
+    toc-location: body
+    toc-depth: 3
+    number-sections: true
+    smooth-scroll: true
+    html-math-method:
+      method: mathjax
+      url: "https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"
+    self-contained-math: true
+    df-print: kable
+    reference-location: document
+    citation-location: document
+    bibliography: bibliography.bib
+    tbl-cap-location: top

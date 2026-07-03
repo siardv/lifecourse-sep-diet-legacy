@@ -1,0 +1,1297 @@
+---
+title: "Model Specification and Sensitivity Analysis"
+author: "Siard van den Bosch"
+date: last-modified
+---
+
+```{r}
+#| label: setup
+#| echo: FALSE
+#| include: FALSE
+
+rm(list = ls()) # remove all objects from env
+invisible(gc(full = TRUE)) # free up memory
+
+options(digits = 3, scipen = 100, knitr.kable.NA = "—") # set global options
+knitr::opts_knit$set( # configure knitr options
+  progress = FALSE,
+  verbose = FALSE,
+  cache = FALSE,
+  knitr.table.format = "html",
+  escape = FALSE,
+  digits = 3,
+  row.names = FALSE
+)
+```
+
+```{r}
+#| label: load-project-resource
+#| echo: FALSE
+functions <- c("pipes", "format_p_value", "named_list", "load_most_recent_rds", "describe", "numeric_data_frame", "create_formula", "save_rds", "move_column_after", "compare_models", "rownames_to_column", "standardized_residuals", "remove_columns_by_name", "beautify_names", "calculate_performance", "model_info", "compare_nested_models", "structure_models", "essential", "bootstrap", "model_summary", "format_coef", "highlight_function", "second_order_interactions", "johnson_neyman_plot", "jn_plot", "extract_term_ranges", "calculate_p_value_from_ci", "is_continuous", "footnote", "as_kable", "add_style")
+
+purrr::walk(functions, ~ source(file.path("functions", paste0(.x, ".R"))))
+unadjusted <- haven::read_sav("data/imputed_data.sav")
+adjusted <- NULL; #load_most_recent_rds("adjusted_data", "data")
+
+unadjusted_fits <- NULL #load_most_recent_rds("unadjusted_fits_", dir = "data")
+adjusted_fits <- NULL #load_most_recent_rds("adjusted_fits_", dir = "data")
+
+# SET GLOBAL N BOOTSTRAP REPLICATES
+N_BOOTSTRAPS <- 1000
+```
+
+
+```{r eval=FALSE, message=FALSE, warning=FALSE}
+# purrr::iwalk(functions, ~ highlight_function(.x))
+```
+
+## Model Specification
+
+Model 1 examines the association between SEP and diet quality (DHD index)
+```{r}
+#| label: model-1
+model_1 <- dhd_index ~ education_self + occupation_self
+```
+
+Model 2 investigates how SEP, household income, and financial difficulties relate to diet quality
+```{r}
+#| label: model-2
+# Removed terms: No terms were removed
+# Added terms: income_hh_eq, financial_difficulties
+model_2 <- dhd_index ~ education_self + occupation_self +
+  income_hh_eq + financial_difficulties
+```
+
+Model 3 examines gender differences in the relationship between individual SEP and diet quality
+```{r}
+#| label: model-3
+# Removed terms: No terms were removed
+# Added terms: woman, education_self:woman, occupation_self:woman
+model_3 <- dhd_index ~ education_self + occupation_self + woman +
+  education_self:woman + occupation_self:woman +
+  income_hh_eq + financial_difficulties
+```
+
+Model 4 explores the relationship between SEP and diet quality, accounting for parental SEP
+```{r}
+#| label: model-4
+# Removed terms: No terms were removed
+# Added terms: education_father, occupation_father, education_mother, occupation_mother
+model_4 <- dhd_index ~ education_self + occupation_self +
+  education_father + occupation_father + education_mother +
+  occupation_mother + income_hh_eq + financial_difficulties
+```
+
+Model 5 includes interactions between the individual's SEP and parental SEP
+```{r}
+#| label: model-5
+# Removed terms: No terms were removed
+# Added terms: education_self:education_father, education_self:education_mother,
+# occupation_self:occupation_father, occupation_self:occupation_mother
+model_5 <- dhd_index ~ education_self + occupation_self +
+  education_father + occupation_father + education_mother +
+  occupation_mother +
+  education_self:education_father + education_self:education_mother +
+  occupation_self:occupation_father + occupation_self:occupation_mother +
+  income_hh_eq + financial_difficulties
+```
+
+Model 6 examines if gender moderates the relationship between SEP and diet quality
+
+```{r}
+#| label: model-6
+# Removed terms: No terms were removed
+# Added terms: education_self:woman, occupation_self:woman,
+# education_father:woman, occupation_father:woman,
+# education_mother:woman, occupation_mother:woman
+model_6 <- dhd_index ~ education_self + occupation_self + woman +
+  education_father + occupation_father + education_mother +
+  occupation_mother +
+  education_self:woman + occupation_self:woman +
+  education_father:woman + occupation_father:woman +
+  education_mother:woman + occupation_mother:woman +
+  income_hh_eq + financial_difficulties
+```
+
+
+
+Model 7 includes interactions between the individual's SEP and partner's SEP
+
+```{r}
+#| label: model-7
+# Removed terms: No terms were removed
+# Added terms: education_self:education_partner, occupation_self:occupation_partner
+model_7 <- dhd_index ~ education_self + occupation_self +
+  education_partner + occupation_partner +
+  education_self:education_partner + occupation_self:occupation_partner +
+  income_hh_eq + financial_difficulties
+```
+
+Model 8 includes interactions between the individual's SEP, partner's SEP, and gender
+
+```{r}
+#| label: model-8
+# Removed terms: No terms were removed
+# Added terms: education_self:woman, occupation_self:woman,
+# education_partner:woman, occupation_partner:woman
+model_8 <- dhd_index ~ education_self + occupation_self + woman +
+  education_partner + occupation_partner +
+  education_self:education_partner + occupation_self:occupation_partner +
+  education_self:woman + occupation_self:woman +
+  education_partner:woman + occupation_partner:woman +
+  income_hh_eq + financial_difficulties
+```
+
+Model 9 is a multivariate model including individual characteristics and justified interactions
+
+```{r}
+#| label: model-9
+# Removed terms: No terms were removed
+# Added terms: age, smoking_status, dhd_kcal, hh_size, children_yn,
+# education_self:education_father, education_self:education_mother,
+# occupation_self:occupation_father, occupation_self:occupation_mother,
+# education_self:education_partner, occupation_self:occupation_partner,
+# education_self:woman, occupation_self:woman
+model_9 <- dhd_index ~ education_self + occupation_self + woman +
+  education_father + occupation_father + education_mother +
+  occupation_mother + education_partner + occupation_partner +
+  age + smoking_status + dhd_kcal + hh_size + children_yn +
+  education_self:education_father + education_self:education_mother +
+  occupation_self:occupation_father + occupation_self:occupation_mother +
+  education_self:education_partner + occupation_self:occupation_partner +
+  education_self:woman + occupation_self:woman +
+  education_partner:woman + occupation_partner:woman +
+  income_hh_eq + financial_difficulties
+```
+
+Certainly! Below are 10 alternative models for each of the 9 initial models, designed to align with your research questions and goals. These models offer different combinations of variables and interactions to help you determine the best model specifications. Each model includes the necessary R code.
+
+```{r}
+#| label: alternative-models
+
+# Model 1: Association Between Individual SEP and Diet Quality
+
+# Model 1a: Add Age as a Covariate
+
+
+model_1a <- dhd_index ~ education_self + occupation_self + age
+
+# Model 1b: Include Gender
+
+
+model_1b <- dhd_index ~ education_self + occupation_self + woman
+
+# Model 1c: Add Smoking Status
+
+
+model_1c <- dhd_index ~ education_self + occupation_self + smoking_status
+
+# Model 1d: Interaction Between Education and Occupation
+
+
+model_1d <- dhd_index ~ education_self * occupation_self
+
+# Model 1e: Include Household Size
+
+
+model_1e <- dhd_index ~ education_self + occupation_self + hh_size
+
+# Model 1f: Add Children in Household
+
+
+model_1f <- dhd_index ~ education_self + occupation_self + children_yn
+
+# Model 1g: Include Caloric Intake (dhd_kcal)
+
+
+model_1g <- dhd_index ~ education_self + occupation_self + dhd_kcal
+
+# Model 1h: Add Financial Difficulties
+
+
+model_1h <- dhd_index ~ education_self + occupation_self + financial_difficulties
+
+# Model 1i: Interaction Between Education and Gender
+
+
+model_1i <- dhd_index ~ education_self * woman + occupation_self
+
+# Model 1j: Include Both Age and Smoking Status
+
+
+model_1j <- dhd_index ~ education_self + occupation_self + age + smoking_status
+
+# Model 2: Adding Household Income and Financial Difficulties
+
+# Model 2a: Interaction Between Education and Income
+
+
+model_2a <- dhd_index ~ education_self + occupation_self + income_hh_eq +
+  financial_difficulties + education_self:income_hh_eq
+
+# Model 2b: Interaction Between Occupation and Financial Difficulties
+
+
+model_2b <- dhd_index ~ education_self + occupation_self + income_hh_eq +
+  financial_difficulties + occupation_self:financial_difficulties
+
+# Model 2c: Include Age and Gender
+
+
+model_2c <- dhd_index ~ education_self + occupation_self + income_hh_eq +
+  financial_difficulties + age + woman
+
+# Model 2d: Add Smoking Status
+
+
+model_2d <- dhd_index ~ education_self + occupation_self + income_hh_eq +
+  financial_difficulties + smoking_status
+
+# Model 2e: Interaction Between Income and Financial Difficulties
+
+
+model_2e <- dhd_index ~ education_self + occupation_self + income_hh_eq *
+  financial_difficulties
+
+# Model 2f: Include Household Size and Children
+
+
+model_2f <- dhd_index ~ education_self + occupation_self + income_hh_eq +
+  financial_difficulties + hh_size + children_yn
+
+# Model 2g: Add Home Ownership Status
+
+
+model_2g <- dhd_index ~ education_self + occupation_self + income_hh_eq +
+  financial_difficulties + home_owner
+
+# Model 2h: Interaction Between Education and Financial Difficulties
+
+
+model_2h <- dhd_index ~ education_self * financial_difficulties +
+  occupation_self + income_hh_eq
+
+# Model 2i: Include Diet-Related Variables
+
+
+model_2i <- dhd_index ~ education_self + occupation_self + income_hh_eq +
+  financial_difficulties + dhd_kcal
+
+# Model 2j: Interaction Between Occupation and Income
+
+
+model_2j <- dhd_index ~ education_self + occupation_self * income_hh_eq +
+  financial_difficulties
+
+# Model 3: Gender Differences in the Relationship Between SEP and Diet Quality
+
+# Model 3a: Add Interaction Between Income and Gender
+
+
+model_3a <- dhd_index ~ education_self + occupation_self + woman +
+  income_hh_eq + financial_difficulties + income_hh_eq:woman
+
+# Model 3b: Include Interaction Between Financial Difficulties and Gender
+
+
+model_3b <- dhd_index ~ education_self + occupation_self + woman +
+  income_hh_eq + financial_difficulties + financial_difficulties:woman
+
+# Model 3c: Interaction Between Education, Occupation, and Gender
+
+
+model_3c <- dhd_index ~ education_self * occupation_self * woman +
+  income_hh_eq + financial_difficulties
+
+# Model 3d: Add Age and Smoking Status
+
+
+model_3d <- dhd_index ~ education_self + occupation_self + woman +
+  income_hh_eq + financial_difficulties + age + smoking_status
+
+# Model 3e: Interaction Between Education and Occupation
+
+
+model_3e <- dhd_index ~ education_self * occupation_self + woman +
+  income_hh_eq + financial_difficulties
+
+# Model 3f: Include Household Size and Children
+
+
+model_3f <- dhd_index ~ education_self + occupation_self + woman +
+  income_hh_eq + financial_difficulties + hh_size + children_yn
+
+# Model 3g: Interaction Between Education, Gender, and Financial Difficulties
+
+
+model_3g <- dhd_index ~ education_self * woman * financial_difficulties +
+  occupation_self + income_hh_eq
+
+# Model 3h: Add Home Ownership Status
+
+
+model_3h <- dhd_index ~ education_self + occupation_self + woman +
+  income_hh_eq + financial_difficulties + home_owner
+
+# Model 3i: Interaction Between Occupation and Gender Only
+
+
+model_3i <- dhd_index ~ education_self + occupation_self * woman +
+  income_hh_eq + financial_difficulties
+
+# Model 3j: Include Diet-Related Variables
+
+
+model_3j <- dhd_index ~ education_self + occupation_self + woman +
+  income_hh_eq + financial_difficulties + dhd_kcal
+
+# Model 4: Including Parental Socioeconomic Position
+
+# Model 4a: Add Interaction Between Parental Education
+
+
+model_4a <- dhd_index ~ education_self + occupation_self +
+  education_father * education_mother + income_hh_eq + financial_difficulties
+
+# Model 4b: Interaction Between Parental Occupation
+
+
+model_4b <- dhd_index ~ education_self + occupation_self +
+  occupation_father * occupation_mother + income_hh_eq + financial_difficulties
+
+# Model 4c: Include Gender
+
+
+model_4c <- dhd_index ~ education_self + occupation_self + woman +
+  education_father + occupation_father + education_mother +
+  occupation_mother + income_hh_eq + financial_difficulties
+
+# Model 4d: Interaction Between Parental Education and Gender
+
+
+model_4d <- dhd_index ~ education_self + occupation_self +
+  education_father + education_mother + woman +
+  education_father:woman + education_mother:woman +
+  income_hh_eq + financial_difficulties
+
+# Model 4e: Add Age and Smoking Status
+
+
+model_4e <- dhd_index ~ education_self + occupation_self +
+  education_father + occupation_father + education_mother +
+  occupation_mother + income_hh_eq + financial_difficulties +
+  age + smoking_status
+
+# Model 4f: Interaction Between Individual and Parental Education
+
+
+model_4f <- dhd_index ~ education_self * education_father +
+  education_self * education_mother + occupation_self +
+  occupation_father + occupation_mother + income_hh_eq + financial_difficulties
+
+# Model 4g: Include Household Size and Children
+
+
+model_4g <- dhd_index ~ education_self + occupation_self +
+  education_father + occupation_father + education_mother +
+  occupation_mother + income_hh_eq + financial_difficulties +
+  hh_size + children_yn
+
+# Model 4h: Interaction Between Parental Occupation and Gender
+
+
+model_4h <- dhd_index ~ education_self + occupation_self +
+  occupation_father + occupation_mother + woman +
+  occupation_father:woman + occupation_mother:woman +
+  income_hh_eq + financial_difficulties
+
+# Model 4i: Add Financial Difficulties Interaction
+
+
+model_4i <- dhd_index ~ education_self + occupation_self +
+  education_father + occupation_father + education_mother +
+  occupation_mother + income_hh_eq + financial_difficulties +
+  financial_difficulties:education_father +
+  financial_difficulties:education_mother
+
+# Model 4j: Include Home Ownership Status
+
+
+model_4j <- dhd_index ~ education_self + occupation_self +
+  education_father + occupation_father + education_mother +
+  occupation_mother + income_hh_eq + financial_difficulties +
+  home_owner
+
+# Model 5: Interactions Between Individual and Parental SEP
+
+# Model 5a: Add Interaction Between Occupation Self and Education Father
+
+
+model_5a <- dhd_index ~ education_self + occupation_self +
+  education_father + occupation_father + education_mother +
+  occupation_mother + occupation_self:education_father +
+  income_hh_eq + financial_difficulties
+
+# Model 5b: Interaction Between Education Self and Occupation Father
+
+
+model_5b <- dhd_index ~ education_self + occupation_self +
+  education_father + occupation_father + education_mother +
+  occupation_mother + education_self:occupation_father +
+  income_hh_eq + financial_difficulties
+
+# Model 5c: Include Gender and Its Interactions
+
+
+model_5c <- dhd_index ~ education_self + occupation_self +
+  education_father + occupation_father + education_mother +
+  occupation_mother + woman +
+  education_self:education_father + education_self:education_mother +
+  occupation_self:occupation_father + occupation_self:occupation_mother +
+  woman:education_self + woman:occupation_self +
+  income_hh_eq + financial_difficulties
+
+# Model 5d: Add Age and Smoking Status
+
+
+model_5d <- dhd_index ~ education_self + occupation_self +
+  education_father + occupation_father + education_mother +
+  occupation_mother + education_self:education_father +
+  education_self:education_mother + occupation_self:occupation_father +
+  occupation_self:occupation_mother + income_hh_eq + financial_difficulties +
+  age + smoking_status
+
+# Model 5e: Include Household Size and Children
+
+
+model_5e <- dhd_index ~ education_self + occupation_self +
+  education_father + occupation_father + education_mother +
+  occupation_mother + education_self:education_father +
+  education_self:education_mother + occupation_self:occupation_father +
+  occupation_self:occupation_mother + income_hh_eq + financial_difficulties +
+  hh_size + children_yn
+
+# Model 5f: Interaction Between Parental SEP Variables
+
+
+model_5f <- dhd_index ~ education_self + occupation_self +
+  education_father * occupation_father + education_mother * occupation_mother +
+  education_self:education_father + education_self:education_mother +
+  occupation_self:occupation_father + occupation_self:occupation_mother +
+  income_hh_eq + financial_difficulties
+
+# Model 5g: Add Home Ownership Status
+
+
+model_5g <- dhd_index ~ education_self + occupation_self +
+  education_father + occupation_father + education_mother +
+  occupation_mother + education_self:education_father +
+  education_self:education_mother + occupation_self:occupation_father +
+  occupation_self:occupation_mother + income_hh_eq + financial_difficulties +
+  home_owner
+
+# Model 5h: Include Diet-Related Variables
+
+
+model_5h <- dhd_index ~ education_self + occupation_self +
+  education_father + occupation_father + education_mother +
+  occupation_mother + education_self:education_father +
+  education_self:education_mother + occupation_self:occupation_father +
+  occupation_self:occupation_mother + income_hh_eq + financial_difficulties +
+  dhd_kcal
+
+# Model 5i: Interaction Between Financial Difficulties and Parental SEP
+
+
+model_5i <- dhd_index ~ education_self + occupation_self +
+  education_father + occupation_father + education_mother +
+  occupation_mother + education_self:education_father +
+  education_self:education_mother + occupation_self:occupation_father +
+  occupation_self:occupation_mother + income_hh_eq + financial_difficulties +
+  financial_difficulties:education_father +
+  financial_difficulties:education_mother
+
+# Model 5j: Interaction Between All SEP Variables
+
+
+model_5j <- dhd_index ~ education_self * occupation_self *
+  education_father * occupation_father *
+  education_mother * occupation_mother +
+  income_hh_eq + financial_difficulties
+
+# Model 6: Gender as a Moderator Between SEP and Diet Quality
+
+# Model 6a: Interaction Between Income and Gender
+
+
+model_6a <- dhd_index ~ education_self + occupation_self + woman +
+  education_father + occupation_father + education_mother + occupation_mother +
+  income_hh_eq + financial_difficulties + income_hh_eq:woman
+
+# Model 6b: Interaction Between Financial Difficulties and Gender
+
+
+model_6b <- dhd_index ~ education_self + occupation_self + woman +
+  education_father + occupation_father + education_mother + occupation_mother +
+  income_hh_eq + financial_difficulties + financial_difficulties:woman
+
+# Model 6c: Include Age and Smoking Status
+
+
+model_6c <- dhd_index ~ education_self + occupation_self + woman +
+  education_father + occupation_father + education_mother + occupation_mother +
+  income_hh_eq + financial_difficulties + age + smoking_status
+
+# Model 6d: Interaction Between Parental SEP and Gender Only
+
+
+model_6d <- dhd_index ~ education_self + occupation_self + woman +
+  education_father:woman + occupation_father:woman +
+  education_mother:woman + occupation_mother:woman +
+  income_hh_eq + financial_difficulties
+
+# Model 6e: Include Household Size and Children
+
+
+model_6e <- dhd_index ~ education_self + occupation_self + woman +
+  education_father + occupation_father + education_mother + occupation_mother +
+  income_hh_eq + financial_difficulties + hh_size + children_yn
+
+# Model 6f: Interaction Between Individual SEP and Gender Only
+
+
+model_6f <- dhd_index ~ education_self:woman + occupation_self:woman +
+  education_father + occupation_father + education_mother + occupation_mother +
+  income_hh_eq + financial_difficulties
+
+# Model 6g: Add Diet-Related Variables
+
+
+model_6g <- dhd_index ~ education_self + occupation_self + woman +
+  education_father + occupation_father + education_mother + occupation_mother +
+  income_hh_eq + financial_difficulties + dhd_kcal
+
+# Model 6h: Interaction Between All SEP Variables and Gender
+
+
+model_6h <- dhd_index ~ (education_self + occupation_self +
+  education_father + occupation_father + education_mother + occupation_mother) *
+  woman + income_hh_eq + financial_difficulties
+
+# Model 6i: Interaction Between Education and Gender
+
+
+model_6i <- dhd_index ~ education_self * woman + occupation_self +
+  education_father * woman + education_mother * woman +
+  income_hh_eq + financial_difficulties
+
+# Model 6j: Include Home Ownership Status
+
+
+model_6j <- dhd_index ~ education_self + occupation_self + woman +
+  education_father + occupation_father + education_mother + occupation_mother +
+  income_hh_eq + financial_difficulties + home_owner
+
+# Model 7: Interactions Between Individual and Partner’s SEP
+
+# Model 7a: Add Interaction Between Partner’s Education and Gender
+
+
+model_7a <- dhd_index ~ education_self + occupation_self +
+  education_partner + occupation_partner + woman +
+  education_partner:woman + income_hh_eq + financial_difficulties
+
+# Model 7b: Interaction Between Partner’s Occupation and Gender
+
+
+model_7b <- dhd_index ~ education_self + occupation_self +
+  education_partner + occupation_partner + woman +
+  occupation_partner:woman + income_hh_eq + financial_difficulties
+
+# Model 7c: Include Age and Smoking Status
+
+
+model_7c <- dhd_index ~ education_self + occupation_self +
+  education_partner + occupation_partner + income_hh_eq +
+  financial_difficulties + age + smoking_status
+
+# Model 7d: Interaction Between Education and Occupation (Self and Partner)
+
+
+model_7d <- dhd_index ~ education_self * occupation_self +
+  education_partner * occupation_partner +
+  education_self:education_partner + occupation_self:occupation_partner +
+  income_hh_eq + financial_difficulties
+
+# Model 7e: Include Household Size and Children
+
+
+model_7e <- dhd_index ~ education_self + occupation_self +
+  education_partner + occupation_partner +
+  education_self:education_partner + occupation_self:occupation_partner +
+  income_hh_eq + financial_difficulties + hh_size + children_yn
+
+# Model 7f: Interaction Between Partner’s SEP Variables
+
+
+model_7f <- dhd_index ~ education_self + occupation_self +
+  education_partner * occupation_partner +
+  education_self:education_partner + occupation_self:occupation_partner +
+  income_hh_eq + financial_difficulties
+
+# Model 7g: Add Home Ownership Status
+
+
+model_7g <- dhd_index ~ education_self + occupation_self +
+  education_partner + occupation_partner +
+  education_self:education_partner + occupation_self:occupation_partner +
+  income_hh_eq + financial_difficulties + home_owner
+
+# Model 7h: Include Diet-Related Variables
+
+
+model_7h <- dhd_index ~ education_self + occupation_self +
+  education_partner + occupation_partner +
+  education_self:education_partner + occupation_self:occupation_partner +
+  income_hh_eq + financial_difficulties + dhd_kcal
+
+# Model 7i: Interaction Between Financial Difficulties and Partner’s SEP
+
+
+model_7i <- dhd_index ~ education_self + occupation_self +
+  education_partner + occupation_partner +
+  education_self:education_partner + occupation_self:occupation_partner +
+  income_hh_eq + financial_difficulties +
+  financial_difficulties:education_partner +
+  financial_difficulties:occupation_partner
+
+# Model 7j: Interaction Between All SEP Variables
+
+
+model_7j <- dhd_index ~ education_self * occupation_self *
+  education_partner * occupation_partner +
+  income_hh_eq + financial_difficulties
+
+# Model 8: Interactions with Partner’s SEP and Gender
+
+# Model 8a: Interaction Between Partner’s SEP and Gender Only
+
+
+model_8a <- dhd_index ~ education_self + occupation_self + woman +
+  education_partner:woman + occupation_partner:woman +
+  income_hh_eq + financial_difficulties
+
+# Model 8b: Include Age and Smoking Status
+
+
+model_8b <- dhd_index ~ education_self + occupation_self + woman +
+  education_partner + occupation_partner +
+  education_self:education_partner + occupation_self:occupation_partner +
+  education_self:woman + occupation_self:woman +
+  education_partner:woman + occupation_partner:woman +
+  income_hh_eq + financial_difficulties + age + smoking_status
+
+# Model 8c: Interaction Between Income and Gender
+
+
+model_8c <- dhd_index ~ education_self + occupation_self + woman +
+  education_partner + occupation_partner +
+  income_hh_eq * woman + financial_difficulties
+
+# Model 8d: Include Household Size and Children
+
+
+model_8d <- dhd_index ~ education_self + occupation_self + woman +
+  education_partner + occupation_partner +
+  education_self:education_partner + occupation_self:occupation_partner +
+  education_self:woman + occupation_self:woman +
+  education_partner:woman + occupation_partner:woman +
+  income_hh_eq + financial_difficulties + hh_size + children_yn
+
+# Model 8e: Interaction Between Financial Difficulties and Gender
+
+
+model_8e <- dhd_index ~ education_self + occupation_self + woman +
+  education_partner + occupation_partner +
+  financial_difficulties * woman +
+  education_self:woman + occupation_self:woman +
+  education_partner:woman + occupation_partner:woman +
+  income_hh_eq
+
+# Model 8f: Interaction Between All SEP Variables and Gender
+
+
+model_8f <- dhd_index ~ (education_self + occupation_self +
+  education_partner + occupation_partner) * woman +
+  education_self:education_partner + occupation_self:occupation_partner +
+  income_hh_eq + financial_difficulties
+
+# Model 8g: Add Home Ownership Status
+
+
+model_8g <- dhd_index ~ education_self + occupation_self + woman +
+  education_partner + occupation_partner +
+  education_self:education_partner + occupation_self:occupation_partner +
+  education_self:woman + occupation_self:woman +
+  education_partner:woman + occupation_partner:woman +
+  income_hh_eq + financial_difficulties + home_owner
+
+# Model 8h: Include Diet-Related Variables
+
+
+model_8h <- dhd_index ~ education_self + occupation_self + woman +
+  education_partner + occupation_partner +
+  education_self:education_partner + occupation_self:occupation_partner +
+  education_self:woman + occupation_self:woman +
+  education_partner:woman + occupation_partner:woman +
+  income_hh_eq + financial_difficulties + dhd_kcal
+
+# Model 8i: Interaction Between Partner’s SEP and Financial Difficulties
+
+
+model_8i <- dhd_index ~ education_self + occupation_self + woman +
+  education_partner + occupation_partner +
+  financial_difficulties:education_partner +
+  financial_difficulties:occupation_partner +
+  education_self:woman + occupation_self:woman +
+  education_partner:woman + occupation_partner:woman +
+  income_hh_eq + financial_difficulties
+
+# Model 8j: Interaction Between All Variables
+
+
+model_8j <- dhd_index ~ (education_self * occupation_self *
+  education_partner * occupation_partner * woman) +
+  income_hh_eq + financial_difficulties
+
+# Model 9: Comprehensive Multivariate # Model with Additional Covariates and Interactions
+
+# Model 9a: Add Interaction Between Age and Gender
+
+
+model_9a <- dhd_index ~ education_self + occupation_self + woman +
+  age * woman + smoking_status + dhd_kcal + hh_size + children_yn +
+  education_father + occupation_father + education_mother + occupation_mother +
+  education_partner + occupation_partner +
+  education_self:education_father + education_self:education_mother +
+  occupation_self:occupation_father + occupation_self:occupation_mother +
+  education_self:education_partner + occupation_self:occupation_partner +
+  education_self:woman + occupation_self:woman +
+  income_hh_eq + financial_difficulties
+
+# Model 9b: Include Interaction Between Smoking Status and Gender
+
+
+model_9b <- dhd_index ~ education_self + occupation_self + woman +
+  age + smoking_status * woman + dhd_kcal + hh_size + children_yn +
+  education_father + occupation_father + education_mother + occupation_mother +
+  education_partner + occupation_partner +
+  education_self:education_father + education_self:education_mother +
+  occupation_self:occupation_father + occupation_self:occupation_mother +
+  education_self:education_partner + occupation_self:occupation_partner +
+  education_self:woman + occupation_self:woman +
+  income_hh_eq + financial_difficulties
+
+# Model 9c: Add Home Ownership Status
+
+
+model_9c <- dhd_index ~ education_self + occupation_self + woman +
+  age + smoking_status + dhd_kcal + hh_size + children_yn + home_owner +
+  education_father + occupation_father + education_mother + occupation_mother +
+  education_partner + occupation_partner +
+  education_self:education_father + education_self:education_mother +
+  occupation_self:occupation_father + occupation_self:occupation_mother +
+  education_self:education_partner + occupation_self:occupation_partner +
+  education_self:woman + occupation_self:woman +
+  income_hh_eq + financial_difficulties
+
+# Model 9d: Interaction Between Financial Difficulties and Gender
+
+
+model_9d <- dhd_index ~ education_self + occupation_self + woman +
+  age + smoking_status + dhd_kcal + hh_size + children_yn +
+  education_father + occupation_father + education_mother + occupation_mother +
+  education_partner + occupation_partner +
+  education_self:education_father + education_self:education_mother +
+  occupation_self:occupation_father + occupation_self:occupation_mother +
+  education_self:education_partner + occupation_self:occupation_partner +
+  education_self:woman + occupation_self:woman +
+  financial_difficulties * woman + income_hh_eq
+
+# Model 9e: Include Interaction Between Income and Gender
+
+
+model_9e <- dhd_index ~ education_self + occupation_self + woman +
+  age + smoking_status + dhd_kcal + hh_size + children_yn +
+  education_father + occupation_father + education_mother + occupation_mother +
+  education_partner + occupation_partner +
+  education_self:education_father + education_self:education_mother +
+  occupation_self:occupation_father + occupation_self:occupation_mother +
+  education_self:education_partner + occupation_self:occupation_partner +
+  education_self:woman + occupation_self:woman +
+  income_hh_eq * woman + financial_difficulties
+
+# Model 9f: Interaction Between All SEP Variables and Gender
+
+
+model_9f <- dhd_index ~ (education_self + occupation_self +
+  education_father + occupation_father + education_mother + occupation_mother +
+  education_partner + occupation_partner) * woman +
+  age + smoking_status + dhd_kcal + hh_size + children_yn +
+  education_self:education_father + education_self:education_mother +
+  occupation_self:occupation_father + occupation_self:occupation_mother +
+  education_self:education_partner + occupation_self:occupation_partner +
+  income_hh_eq + financial_difficulties
+
+# Model 9g: Add Diet Quality Index Components
+
+
+model_9g <- dhd_index ~ education_self + occupation_self + woman +
+  age + smoking_status + hh_size + children_yn +
+  dhd_kcal + dhd_sugar + dhd_fruit + dhd_vegetables +
+  education_father + occupation_father + education_mother + occupation_mother +
+  education_partner + occupation_partner +
+  education_self:education_father + education_self:education_mother +
+  occupation_self:occupation_father + occupation_self:occupation_mother +
+  education_self:education_partner + occupation_self:occupation_partner +
+  education_self:woman + occupation_self:woman +
+  income_hh_eq + financial_difficulties
+
+# Model 9h: Include Interaction Between Household Size and Children
+
+
+model_9h <- dhd_index ~ education_self + occupation_self + woman +
+  age + smoking_status + dhd_kcal + hh_size * children_yn +
+  education_father + occupation_father + education_mother + occupation_mother +
+  education_partner + occupation_partner +
+  education_self:education_father + education_self:education_mother +
+  occupation_self:occupation_father + occupation_self:occupation_mother +
+  education_self:education_partner + occupation_self:occupation_partner +
+  education_self:woman + occupation_self:woman +
+  income_hh_eq + financial_difficulties
+
+# Model 9i: Interaction Between Age and Smoking Status
+
+
+model_9i <- dhd_index ~ education_self + occupation_self + woman +
+  age * smoking_status + dhd_kcal + hh_size + children_yn +
+  education_father + occupation_father + education_mother + occupation_mother +
+  education_partner + occupation_partner +
+  education_self:education_father + education_self:education_mother +
+  occupation_self:occupation_father + occupation_self:occupation_mother +
+  education_self:education_partner + occupation_self:occupation_partner +
+  education_self:woman + occupation_self:woman +
+  income_hh_eq + financial_difficulties
+
+# Model 9j: Comprehensive # Model with All Interactions
+
+
+model_9j <- dhd_index ~ (education_self * occupation_self *
+  education_father * occupation_father *
+  education_mother * occupation_mother *
+  education_partner * occupation_partner * woman) +
+  age + smoking_status + dhd_kcal + hh_size + children_yn +
+  income_hh_eq + financial_difficulties
+
+# paste0("model_", rep(1:9, each = 10), letters[1:10]) %>% toString()
+```
+```{r}
+# Create a named list of models
+# model_list <- named_list(
+#   model_1, model_2, model_3,
+#   model_4, model_5, model_6,
+#   model_7, model_8, model_9
+# )
+
+model_list <- named_list(
+  model_1a, model_1b, model_1c, model_1d, model_1e, model_1f, model_1g, model_1h, model_1i, model_1j, model_2a, model_2b, model_2c, model_2d, model_2e, model_2f, model_2g, model_2h, model_2i, model_2j, model_3a, model_3b, model_3c, model_3d, model_3e, model_3f, model_3g, model_3h, model_3i, model_3j, model_4a, model_4b, model_4c, model_4d, model_4e, model_4f, model_4g, model_4h, model_4i, model_4j, model_5a, model_5b, model_5c, model_5d, model_5e, model_5f, model_5g, model_5h, model_5i, model_5j, model_6a, model_6b, model_6c, model_6d, model_6e, model_6f, model_6g, model_6h, model_6i, model_6j, model_7a, model_7b, model_7c, model_7d, model_7e, model_7f, model_7g, model_7h, model_7i, model_7j, model_8a, model_8b, model_8c, model_8d, model_8e, model_8f, model_8g, model_8h, model_8i, model_8j, model_9a, model_9b, model_9c, model_9d, model_9e, model_9f, model_9g, model_9h, model_9i, model_9j
+)
+
+# Function to extract numeric data based on the variables in model_9
+get_numeric_data <- function(df, model = model_9) {
+  df[as.character(attr(terms(model), "variables"))[-1]]
+}
+
+data <- unadjusted #get_numeric_data(adjusted %||% unadjusted)
+```
+
+```{r}
+#| label: prepare-parallel-computing
+#| echo: FALSE
+
+if (is.null(adjusted) || is.null(unadjusted)) {
+  num_cores <- parallel::detectCores() - 1
+  cluster <- parallel::makeCluster(num_cores)
+  invisible(parallel::clusterEvalQ(cluster, {
+    library(boot, quietly = TRUE)
+    library(robustbase, quietly = TRUE)
+    library(dplyr, quietly = TRUE)
+  }))
+
+  parallel::clusterExport(
+    cluster,
+    varlist = c("calculate_p_value_from_ci"),
+    envir = environment()
+  )
+
+  t1 <- Sys.time()
+  fits <- list()
+  for (model_name in names(model_list)) {
+    model_start_time <- Sys.time()
+    cumulative_time <- difftime(model_start_time, t1, units = "mins")
+    cat(paste0(
+      "Fitting model ", dQuote(model_name),
+      " (elapsed time: ", round(cumulative_time, 2), " mins)\n"
+    ))
+
+    model_formula <- model_list[[model_name]]
+    fits[[model_name]] <- tryCatch(
+      {
+        bootstrap(
+          data = data,
+          formula = model_formula,
+          seed = 123,
+          num_bootstraps = N_BOOTSTRAPS,
+          cluster = cluster
+        )
+      },
+      error = function(e) {
+        cli::cli_alert_warning(paste0("Error in model ", dQuote(model_name), ": ", e$message, "\n"))
+        list()
+      }
+    )
+
+
+    parallel::stopCluster(cluster)
+    save_rds(fits,
+      name = paste0(ifelse(is.null(adjusted), "unadjusted_alt", "adjusted_detailed_alt"), "_fits"),
+      dir = "data"
+    )
+  }
+}
+```
+
+After the unadjusted model fits, we evaluate the assumptions to identify high leverage points. Subsequently, we bootstrap with the adjusted data to re-fit the models.
+
+
+
+```{r}
+tryCatch(
+  {
+    closeAllConnections()
+  },
+  error = function(e) {
+
+  }
+)
+
+data <- adjusted # get_numeric_data(adjusted)
+
+num_cores <- parallel::detectCores() - 1
+cluster <- parallel::makeCluster(num_cores)
+invisible(parallel::clusterEvalQ(cluster, {
+  library(boot, quietly = TRUE)
+  library(robustbase, quietly = TRUE)
+  library(dplyr, quietly = TRUE)
+}))
+
+parallel::clusterExport(cluster,
+  varlist = c("calculate_p_value_from_ci"),
+  envir = environment()
+)
+
+t1 <- Sys.time()
+fits <- list()
+for (model_name in names(model_list)) {
+  model_start_time <- Sys.time()
+  cumulative_time <- difftime(model_start_time, t1, units = "mins")
+  cat(paste0(
+    "Fitting model ",
+    dQuote(model_name),
+    " (elapsed time: ",
+    round(cumulative_time, 2),
+    " mins)\n"
+  ))
+
+  fits[[model_name]] <- tryCatch(
+    {
+      bootstrap(
+        data = data,
+        formula = model_formula,
+        seed = 123,
+        num_bootstraps = N_BOOTSTRAPS,
+        cluster = cluster
+      )
+    },
+    error = function(e) {
+      cli::cli_alert_warning(paste0("Error in model ", dQuote(model_name), ": ", e$message, "\n"))
+      list()
+    }
+  )
+}
+
+parallel::stopCluster(cluster)
+
+save_rds(fits, name = "adjusted_alt_fits", dir = "data")
+
+```
+
+
+
+```{r}
+#| label: structure-models
+#| echo: FALSE
+#| message: FALSE
+model_fits <- structure_models()
+```
+
+## Sensitivity Analysis: Comparing Robust Linear Regression Models with and without Influential Observations
+
+Identifying influential observations through regression diagnostics, such as Cook's distance, in conjunction with robust estimation methods, such as the MM-estimator, is essential for ensuring the validity and reliability of results in robust linear regression models. A comprehensive analysis of the 13 robust linear regression models using the MM estimator and Cook's distance, a measure of influence, identified seven data points (observations: 361, 374, 540, 977, 1042, 1175, and 1217) that consistently exceeded the typical threshold of $\frac{4}{n}$ (where $n$ is the sample size) in at least four distinct model specifications. 
+Univariate and multivariate outlier analyses conducted before modeling (see p.4) was unable to detect these influential observations due to their unique configuration of predictor and response values, as an observation's influence in a robust regression model is determined by the combination of its leverage (the extremity of its predictor values) and discrepancy (the degree to which the model poorly fits the observation) rather than its univariate or multivariate distance from the center of the data.
+To quantify the impact of these influential points, a sensitivity analysis was performed by fitting the robust MM-estimator models with and without the seven observations. The results revealed that the inclusion or exclusion of these data points had a substantial effect on key model parameters and goodness-of-fit measures, such as the coefficient estimates ($\hat{\beta}$) and adjusted R-squared ($\bar{R}^2$), even when using a robust estimation method designed to mitigate the influence of outliers. This finding provides direct evidence that these observations drive the results considerably, potentially obscuring the proper relationships between the predictors and the response variable. The recurrent high influence of these seven observations across models with different predictors underscores that their impact stems from their overall configuration of predictor and response values rather than a specific relationship with a single predictor.
+Although the evidence supports the removal of these seven observations, it is crucial to acknowledge the potential limitations and biases introduced by data exclusion, even in the context of robust linear regression models. Therefore, the results are reported with and without these observations to maintain transparency and provide a comprehensive understanding of the data. By prioritizing regression diagnostics in conjunction with robust estimation techniques, analysts can identify truly influential observations and make informed choices to ensure the accuracy and validity of their results. This approach enables a more nuanced understanding of the data. It helps prevent erroneous conclusions based on the undue influence of a small subset of observations, ultimately strengthening the reliability and interpretability of robust linear regression models.
+
+
+```{r}
+#| label: fits-performance-calculation
+#| message: false
+#| warning: false
+#| include: false
+fits_df <- calculate_performance(model_fits)
+move_column_after(fits_df, "r2_p_value", "R2") %>%
+  dplyr::mutate(r2_p_value = format_p_value(
+    r2_p_value,
+    add_stars = TRUE, omit_p_label = FALSE
+  )) %>%
+  dplyr::arrange(model, dplyr::desc(method))
+fits_df
+```
+
+
+```{r}
+#| label: model-fits-table
+#| tbl-cap: "Comparison of Robust Linear Regression Models with and without Leverage Points"
+col_names <- c(
+  "Leverage", "Method", "$R^2$", "", "$R^2 (adj.)$", "RMSE", "$\\sigma$", "AIC", "AICc", "BIC"
+)
+footnote_text <- paste(
+  "The ($R^2$) and adjusted ($R^2$ adj.) gauge model fit,",
+  "RMSE evaluates residual magnitude, and $\\sigma$ denotes error standard deviation.",
+  "The Akaike (AIC) and Bayesian (BIC) information criteria balance fit and parsimony (lower is better),",
+  "but apply only to OLS models, not robust models, as the latter utilize M-estimation without assuming normal residuals.",
+  "AICc adjusts AIC for small sample sizes."
+)
+
+fits_df %>%
+  remove_columns_by_name("model") %>%
+  as_kable() %>%
+  kableExtra::pack_rows(
+    index = c(
+      "Model 1" = 4,
+      "Model 2" = 4,
+      "Model 3" = 4,
+      "Model 4" = 4,
+      "Model 5" = 4,
+      "Model 6" = 4,
+      "Model 7" = 4,
+      "Model 8" = 4,
+      "Model 9" = 4
+    )
+  ) %>%
+  footnote() %>%
+  add_style()
+```
+
+```{r include=FALSE}
+nested_caption <- paste(
+  "Wald and",
+  c("Deviance", "Explained Variance"),
+  "Tests for Nested",
+  c("Robust", "OLS"),
+  "Linear Regression Models (Models 1-9, adjusted for influential observations)"
+)
+
+lmrob_column_headers <- c(
+  "Reference Model",
+  "$DF_{\\text{pseudo1}}$",
+  "$DF_{\\text{pseudo2}}$",
+  "Wald",
+  " ",
+  "Deviance",
+  " ",
+  "DF"
+)
+
+ols_column_headers <- c(
+  "Reference Model",
+  "Res. $DF_1$",
+  "Res. $DF_2$",
+  "Wald",
+  " ",
+  "$R^2 \\Delta$",
+  " ",
+  "DF"
+)
+
+lmrob_footnote <- paste(
+  "$^{***} p \\leq 0.001;\\ ^{**} p \\leq 0.01;\\ ^{*} p \\leq 0.05$.",
+  "The pseudo-degrees of freedom (DF$_{\\text{pseudo}}$) represent an adjusted",
+  "count of degrees of freedom in each robust model. The Wald and Deviance test",
+  "statistics measure the improvement of the full model over the restricted model.",
+  "The degrees of freedom (DF) represent the difference in the number of",
+  "parameters between models. The p-values indicate the probability of observing",
+  "test statistics as extreme as those computed under the null hypothesis,",
+  "which assumes equivalence between the two models. Non-nested pairs",
+  "(`—`) are included for completeness."
+)
+
+ols_footnote <- paste(
+  "Residual degrees of freedom (Res. DF) represent the difference in the number",
+  "of parameters between the full and restricted models. The Wald test statistic",
+  "measures the improvement of the full model over the restricted model.",
+  "The $R^2$ difference ($R^2 \\Delta$) quantifies the change in model fit.",
+  "The degrees of freedom (DF) represent the difference in the number of parameters.",
+  "The p-values indicate the probability of observing test statistics as extreme",
+  "as those computed under the null hypothesis, which assumes equivalence",
+  "between the two models. Non-nested pairs (`—`) are included for completeness."
+)
+```
+
+```{r}
+#| label: nested-models-comparison
+#| tbl-cap:  "Wald and Deviance Tests for Nested Robust Linear Regression Models (Models 1-9, adjusted for influential observations)"
+nested_models_comparison <- compare_nested_models(model_fits, "adjusted", "robust")
+model_counts <- as.numeric(table(nested_models_comparison$A))
+
+nested_models_comparison %>%
+  remove_columns_by_name("A", "Models") %>%
+  as_kable(
+    align = "rrrrlrll",
+    cols = lmrob_column_headers
+  ) %>%
+  kableExtra::pack_rows(
+    index = c(
+      "Model 1" = model_counts[1],
+      "Model 2" = model_counts[2],
+      "Model 3" = model_counts[3],
+      "Model 4" = model_counts[4],
+      "Model 5" = model_counts[5],
+      "Model 6" = model_counts[6],
+      "Model 7" = model_counts[7],
+      "Model 8" = model_counts[8]
+    )
+  ) %>%
+footnote(lmrob_footnote)
+```
+
+```{r}
+#| label: nested-models-comparison-ols
+#| tbl-cap: "Wald and Explained Variance Tests for Nested OLS Linear Regression Models (Models 1-9, adjusted for influential observations)"
+nested_models_comparison_ols <- compare_nested_models(model_fits, "adjusted", "ols")
+model_counts_ols <- as.numeric(table(nested_models_comparison_ols$A))
+
+nested_models_comparison_ols %>%
+  remove_columns_by_name("A", "Models") %>%
+  as_kable(
+    align = "rrrrlrll",
+    cols = ols_column_headers
+  ) %>%
+  kableExtra::pack_rows(
+    index = c(
+      "Model 1" = model_counts_ols[1],
+      "Model 2" = model_counts_ols[2],
+      "Model 3" = model_counts_ols[3],
+      "Model 4" = model_counts_ols[4],
+      "Model 5" = model_counts_ols[5],
+      "Model 6" = model_counts_ols[6],
+      "Model 7" = model_counts_ols[7],
+      "Model 8" = model_counts_ols[8]
+    )
+  ) %>%
+  footnote(ols_footnote)
+```
+
+```{r simplify_model_fits, include=FALSE}
+fits <- purrr::map(model_fits$adjusted$robust, ~ .x$fit)
+```
+
+```{r jn_plots_model_5, fig.cap="Johnson-Neyman Plots (Model 3)", message=FALSE, warning=FALSE}
+jn_plot(fits$model_3) %>%
+  Filter(f = length) %>%
+  gridExtra::grid.arrange(
+    grobs = .,
+    bottom = "Model 3 (robust regression without influential observations)",
+    ncol = 2
+  )
+```
+
+```{r jn_plots_model_5, fig.cap="Johnson-Neyman Plots (Model 5)", message=FALSE, warning=FALSE}
+jn_plot(fits$model_5) %>%
+  Filter(f = length) %>%
+  gridExtra::grid.arrange(
+    grobs = .,
+    bottom = "Model 5 (robust regression without influential observations)",
+    ncol = 2
+  )
+```
+
+```{r jn_plots_model_6, fig.cap="Johnson-Neyman Plots (Model 6)", message=FALSE, warning=FALSE}
+jn_plot(fits$model_6) %>%
+  Filter(f = length) %>%
+  gridExtra::grid.arrange(
+    grobs = .,
+    bottom = "Model 6 (robust regression without influential observations)",
+    ncol = 2
+  )
+```
+
+```{r jn_plots_model_7, fig.cap="Johnson-Neyman Plots (Model 7)", message=FALSE, warning=FALSE}
+jn_plot(fits$model_7) %>%
+  Filter(f = length) %>%
+  gridExtra::grid.arrange(
+    grobs = .,
+    bottom = "Model 7 (robust regression without influential observations)",
+    ncol = 2
+  )
+```
+
+```{r jn_plots_model_8, fig.cap="Johnson-Neyman Plots (Model 8)", message=FALSE, warning=FALSE}
+jn_plot(fits$model_8) %>%
+  Filter(f = length) %>%
+  gridExtra::grid.arrange(
+    grobs = .,
+    bottom = "Model 8 (robust regression without influential observations)",
+    ncol = 2
+  )
+```
+
+```{r jn_plots_model_9, fig.cap="Johnson-Neyman Plots (Model 9)", message=FALSE, warning=FALSE}
+jn_plot(fits$model_9) %>%
+  Filter(f = length) %>%
+  gridExtra::grid.arrange(
+    grobs = .,
+    bottom = "Model 9 (robust regression without influential observations)",
+    ncol = 2
+  )
+```
+
+```{r adjusted_robust_model_summary}
+model_summary(model_fits$adjusted$robust, adjusted = TRUE)
+model_summary(model_fits$adjusted$ols, adjusted = TRUE)
+```
+
+```{r unadjusted_robust_model_summary}
+model_summary(model_fits$unadjusted$robust, adjusted = FALSE)
+model_summary(model_fits$unadjusted$ols, adjusted = FALSE)
+```
+
+
+
+# Appendix
+
+Full tables for the robust linear regression models with and without influential observations are provided below. Each table includes the coefficient estimates, standard errors, t-values, p-values, and 95% confidence intervals for each predictor in the model. The tables also present the bootstrapped coefficient estimates, standard errors, bias, p-values, and 95% confidence intervals for each predictor. The bootstrapped results provide additional information on the stability and reliability of the coefficient estimates in the models.
+
+```{r}
+# contains coef, se, t, p, ci_lower, ci_upper, boot_coef, boot_se, boot_bias, boot_p, boot_ci_lower, boot_ci_upper
+```
