@@ -1,2 +1,6 @@
-
 *.Rds
+*.rds
+*.html
+*.zip
+data/
+.DS_Store
